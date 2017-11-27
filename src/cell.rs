@@ -1,14 +1,17 @@
+//! A mutable memory location for `Copy` types.
+
 use std::fmt::{self, Debug};
 
 /// This should be identical to the `Cell` implementation in the standard
 /// library, but always require that the internal type implements `Copy`
-/// and implements Copy itself.
+/// and implements `Copy` itself.
 #[derive(PartialEq)]
 pub struct CopyCell<T: Copy> {
     value: T
 }
 
 impl<T: Copy> CopyCell<T> {
+    /// Creates a new `CopyCell` containing the given value.
     #[inline]
     pub fn new(value: T) -> Self {
         CopyCell {
@@ -21,6 +24,7 @@ impl<T: Copy> CopyCell<T> {
         &self.value as *const T as *mut T
     }
 
+    /// Returns a copy of the contained value.
     #[inline]
     pub fn get(&self) -> T {
         unsafe {
@@ -28,6 +32,9 @@ impl<T: Copy> CopyCell<T> {
         }
     }
 
+    /// Returns a mutable reference to the underlying data.
+    ///
+    /// This call borrows `CopyCell` mutably (at compile-time) which guarantees that we possess the only reference.
     #[inline]
     pub fn get_mut(&mut self) -> &mut T {
         unsafe {
@@ -35,6 +42,7 @@ impl<T: Copy> CopyCell<T> {
         }
     }
 
+    /// Sets the contained value.
     #[inline]
     pub fn set(&self, value: T) {
         let ptr = unsafe { &mut *self.mut_ptr() };

@@ -112,55 +112,25 @@ static BYTE_MASKS_C: [u64; 256] = [
     C00, C01, C02, C03, C04, C05, C06, C07, C08, C09, C10, C11, C12, C13, C14, C15, // F
 ];
 
-pub trait Bloom {
-    fn as_bytes(&self) -> &[u8];
+/// Calculate a bloom filter for `T`. This function is very fast and works as a constant
+/// speed regardless of the length of bytes, ~1ns on modern laptop.
+#[inline]
+pub fn bloom<T: AsRef<[u8]>>(val: T) -> u64 {
+    let s = val.as_ref();
 
-    #[inline]
-    fn bloom(&self) -> u64 {
-        let s = self.as_bytes();
+    match s.len() {
+        0 => 0x0001000000000000,
 
-        match s.len() {
-            0 => 0x0001000000000000,
+        1 => 0x0002000000000000
+           | BYTE_MASKS_A[s[0] as usize] as u64,
 
-            1 => 0x0002000000000000
-               | BYTE_MASKS_A[s[0] as usize] as u64,
+        2 => 0x0004000000000000
+           | BYTE_MASKS_A[s[0] as usize] as u64
+           | BYTE_MASKS_B[s[1] as usize] as u64,
 
-            2 => 0x0004000000000000
-               | BYTE_MASKS_A[s[0] as usize] as u64
-               | BYTE_MASKS_B[s[1] as usize] as u64,
-
-            n => 0x0001000000000000 << n % 16
-               | BYTE_MASKS_C[s[2] as usize]
-               | BYTE_MASKS_B[s[1] as usize] as u64
-               | BYTE_MASKS_A[s[0] as usize] as u64
-        }
-    }
-}
-
-impl Bloom for str {
-    #[inline]
-    fn as_bytes(&self) -> &[u8] {
-        str::as_bytes(self)
-    }
-}
-
-impl Bloom for [u8] {
-    #[inline]
-    fn as_bytes(&self) -> &[u8] {
-        self
-    }
-}
-
-impl<'a> Bloom for &'a str {
-    #[inline]
-    fn as_bytes(&self) -> &[u8] {
-        str::as_bytes(*self)
-    }
-}
-
-impl<'a> Bloom for &'a [u8] {
-    #[inline]
-    fn as_bytes(&self) -> &[u8] {
-        *self
+        n => 0x0001000000000000 << n % 16
+           | BYTE_MASKS_C[s[2] as usize]
+           | BYTE_MASKS_B[s[1] as usize] as u64
+           | BYTE_MASKS_A[s[0] as usize] as u64
     }
 }

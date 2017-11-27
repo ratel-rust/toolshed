@@ -1,139 +1,17 @@
-use arena::Arena;
+//! A linked list and auxiliary types that can be used with the `Arena`.
+
+use Arena;
 use cell::CopyCell;
 use std::fmt::{self, Debug};
 
-#[derive(Debug, PartialEq, Clone)]
-struct ListItem<'arena, T: 'arena> {
-    value: T,
-    next: CopyCell<Option<&'arena ListItem<'arena, T>>>,
-}
-
-impl<'arena, T: Copy> Copy for ListItem<'arena, T> {}
-
-pub struct ListBuilder<'arena, T: 'arena + Copy> {
-    arena: &'arena Arena,
-    first: &'arena ListItem<'arena, T>,
-    last: &'arena ListItem<'arena, T>,
-}
-
-impl<'arena, T: 'arena + Copy> ListBuilder<'arena, T> {
-    #[inline]
-    pub fn new(arena: &'arena Arena, first: T) -> Self {
-        let first = arena.alloc(ListItem {
-            value: first,
-            next: CopyCell::new(None)
-        });
-
-        ListBuilder {
-            arena,
-            first,
-            last: first
-        }
-    }
-
-    #[inline]
-    pub fn push(&mut self, item: T) {
-        let next = self.arena.alloc(ListItem {
-            value: item,
-            next: CopyCell::new(None)
-        });
-
-        self.last.next.set(Some(next));
-        self.last = next;
-    }
-
-    #[inline]
-    pub fn into_list(self) -> List<'arena, T> {
-        List {
-            root: CopyCell::new(Some(self.first))
-        }
-    }
-}
-
-pub struct EmptyListBuilder<'arena, T: 'arena + Copy> {
-    arena: &'arena Arena,
-    first: Option<&'arena ListItem<'arena, T>>,
-    last: Option<&'arena ListItem<'arena, T>>,
-}
-
-impl<'arena, T: 'arena + Copy> EmptyListBuilder<'arena, T> {
-    #[inline]
-    pub fn new(arena: &'arena Arena) -> Self {
-        EmptyListBuilder {
-            arena,
-            first: None,
-            last: None,
-        }
-    }
-
-    #[inline]
-    pub fn push(&mut self, item: T) {
-        match self.last {
-            None => {
-                self.first = Some(self.arena.alloc(ListItem {
-                    value: item,
-                    next: CopyCell::new(None)
-                }));
-                self.last = self.first;
-            },
-            Some(ref mut last) => {
-                let next = self.arena.alloc(ListItem {
-                    value: item,
-                    next: CopyCell::new(None)
-                });
-
-                last.next.set(Some(next));
-                *last = next;
-            }
-        }
-    }
-
-    #[inline]
-    pub fn into_list(self) -> List<'arena, T> {
-        List {
-            root: CopyCell::new(self.first)
-        }
-    }
-}
-
+/// A single-ended linked list.
 #[derive(Clone)]
 pub struct List<'arena, T: 'arena> {
     root: CopyCell<Option<&'arena ListItem<'arena, T>>>,
 }
 
-impl<'arena, T: Copy> Copy for List<'arena, T> { }
-
-#[derive(Debug, Clone, Copy)]
-pub struct RawList {
-    root: usize
-}
-
-impl RawList {
-    pub unsafe fn into_list<'arena, T: 'arena>(self) -> List<'arena, T> {
-        List {
-            root: CopyCell::new(match self.root {
-                0   => None,
-                ptr => Some(&*(ptr as *const ListItem<'arena, T>))
-            })
-        }
-    }
-}
-
-impl<'arena, T: 'arena + PartialEq> PartialEq for List<'arena, T> {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.iter().eq(other.iter())
-    }
-}
-
-impl<'arena, T: 'arena + Debug> Debug for List<'arena, T> {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_list().entries(self.iter()).finish()
-    }
-}
-
 impl<'arena, T: 'arena> List<'arena, T> {
+    /// Create a new empty `List`.
     #[inline]
     pub fn empty() -> Self {
         List {
@@ -141,21 +19,16 @@ impl<'arena, T: 'arena> List<'arena, T> {
         }
     }
 
+    /// Turns the list into an empty list.
+    ///
+    /// Internally, all this method does is removing the reference to the
+    /// first item on the list.
     #[inline]
     pub fn clear(&self) {
         self.root.set(None);
     }
 
-    #[inline]
-    pub fn into_raw(self) -> RawList {
-        RawList {
-            root: match self.root.get() {
-                Some(ptr) => ptr as *const ListItem<'arena, T> as usize,
-                None      => 0
-            }
-        }
-    }
-
+    /// Returns an iterator over the items in the list.
     #[inline]
     pub fn iter(&self) -> ListIter<'arena, T> {
         ListIter {
@@ -163,6 +36,7 @@ impl<'arena, T: 'arena> List<'arena, T> {
         }
     }
 
+    /// Checks if the list is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.root.get().is_none()
@@ -173,18 +47,30 @@ impl<'arena, T: 'arena> List<'arena, T> {
     #[inline]
     pub fn only_element(&self) -> Option<&'arena T> {
         match self.root.get() {
-            Some(&ListItem { ref value, ref next, .. }) => {
-                match next.get() {
-                    None => Some(value),
-                    _    => None,
-                }
-            },
-            None => None
+            Some(&ListItem {
+                ref value,
+                ref next,
+                ..
+            }) if next.get().is_none() => Some(value),
+            _                          => None
+        }
+    }
+
+    /// Returns an `UnsafeList` for the current `List`. While this function is
+    /// safe itself, using `UnsafeList` might lead to undefined behavior.
+    #[inline]
+    pub fn into_unsafe(self) -> UnsafeList {
+        UnsafeList {
+            root: match self.root.get() {
+                Some(ptr) => ptr as *const ListItem<'arena, T> as usize,
+                None      => 0
+            }
         }
     }
 }
 
 impl<'arena, T: 'arena + Copy> List<'arena, T> {
+    /// Create a single-element list from the given value.
     #[inline]
     pub fn from(arena: &'arena Arena, value: T) -> List<'arena, T> {
         List {
@@ -195,6 +81,7 @@ impl<'arena, T: 'arena + Copy> List<'arena, T> {
         }
     }
 
+    /// Create a list from an iterator of items.
     pub fn from_iter<I>(arena: &'arena Arena, source: I) -> List<'arena, T> where
         I: IntoIterator<Item = T>
     {
@@ -214,7 +101,7 @@ impl<'arena, T: 'arena + Copy> List<'arena, T> {
 
     /// Adds a new element to the beginning of the list.
     #[inline]
-    pub fn unshift(&self, arena: &'arena Arena, value: T) {
+    pub fn prepend(&self, arena: &'arena Arena, value: T) {
         self.root.set(Some(arena.alloc(
             ListItem {
                 value,
@@ -278,6 +165,148 @@ impl<'a, 'arena, T: 'arena> IntoIterator for &'a List<'arena, T> {
     }
 }
 
+impl<'arena, T: Copy> Copy for List<'arena, T> { }
+
+#[derive(Debug, PartialEq, Clone)]
+struct ListItem<'arena, T: 'arena> {
+    value: T,
+    next: CopyCell<Option<&'arena ListItem<'arena, T>>>,
+}
+
+impl<'arena, T: Copy> Copy for ListItem<'arena, T> {}
+
+/// A builder struct that allows to push elements onto the end of the list.
+pub struct ListBuilder<'arena, T: 'arena + Copy> {
+    arena: &'arena Arena,
+    first: &'arena ListItem<'arena, T>,
+    last: &'arena ListItem<'arena, T>,
+}
+
+impl<'arena, T: 'arena + Copy> ListBuilder<'arena, T> {
+    /// Create a new builder with the first element.
+    #[inline]
+    pub fn new(arena: &'arena Arena, first: T) -> Self {
+        let first = arena.alloc(ListItem {
+            value: first,
+            next: CopyCell::new(None)
+        });
+
+        ListBuilder {
+            arena,
+            first,
+            last: first
+        }
+    }
+
+    /// Push a new item at the end of the `List`.
+    #[inline]
+    pub fn push(&mut self, item: T) {
+        let next = self.arena.alloc(ListItem {
+            value: item,
+            next: CopyCell::new(None)
+        });
+
+        self.last.next.set(Some(next));
+        self.last = next;
+    }
+
+    /// Consume the builder and return a `List`.
+    #[inline]
+    pub fn into_list(self) -> List<'arena, T> {
+        List {
+            root: CopyCell::new(Some(self.first))
+        }
+    }
+}
+
+/// A builder struct that allows to push elements onto the end of the list.
+///
+/// This is essentially identical to `ListBuilder` in purpose, but ever so
+/// slightly slower since an extra check has to be performed on each `push`.
+pub struct EmptyListBuilder<'arena, T: 'arena + Copy> {
+    arena: &'arena Arena,
+    first: Option<&'arena ListItem<'arena, T>>,
+    last: Option<&'arena ListItem<'arena, T>>,
+}
+
+impl<'arena, T: 'arena + Copy> EmptyListBuilder<'arena, T> {
+    /// Create a new builder.
+    #[inline]
+    pub fn new(arena: &'arena Arena) -> Self {
+        EmptyListBuilder {
+            arena,
+            first: None,
+            last: None,
+        }
+    }
+
+    /// Push a new item at the end of the `List`.
+    #[inline]
+    pub fn push(&mut self, item: T) {
+        match self.last {
+            None => {
+                self.first = Some(self.arena.alloc(ListItem {
+                    value: item,
+                    next: CopyCell::new(None)
+                }));
+                self.last = self.first;
+            },
+            Some(ref mut last) => {
+                let next = self.arena.alloc(ListItem {
+                    value: item,
+                    next: CopyCell::new(None)
+                });
+
+                last.next.set(Some(next));
+                *last = next;
+            }
+        }
+    }
+
+    /// Consume the builder and return a `List`.
+    #[inline]
+    pub fn into_list(self) -> List<'arena, T> {
+        List {
+            root: CopyCell::new(self.first)
+        }
+    }
+}
+
+/// Unsafe variant of the `List` that erases any lifetime information.
+#[derive(Debug, Clone, Copy)]
+pub struct UnsafeList {
+    root: usize
+}
+
+impl UnsafeList {
+    /// Converts the `UnsafeList` into a regular `List`. Using this with
+    /// incorrect lifetimes of after the original arena has been dropped
+    /// will lead to undefined behavior. Use with extreme care.
+    pub unsafe fn into_list<'arena, T: 'arena>(self) -> List<'arena, T> {
+        List {
+            root: CopyCell::new(match self.root {
+                0   => None,
+                ptr => Some(&*(ptr as *const ListItem<'arena, T>))
+            })
+        }
+    }
+}
+
+impl<'arena, T: 'arena + PartialEq> PartialEq for List<'arena, T> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.iter().eq(other.iter())
+    }
+}
+
+impl<'arena, T: 'arena + Debug> Debug for List<'arena, T> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+/// An iterator over the items in the list.
 pub struct ListIter<'arena, T: 'arena> {
     next: Option<&'arena ListItem<'arena, T>>
 }

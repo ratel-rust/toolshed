@@ -1,10 +1,12 @@
+//! Maps of keys to values that can be used with the `Arena`.
+
 use std::hash::{Hash, Hasher};
 use std::fmt::{self, Debug};
 use fxhash::FxHasher;
 
 use cell::CopyCell;
-use arena::Arena;
-use bloom::Bloom;
+use Arena;
+use bloom::bloom;
 
 #[derive(Clone, Copy)]
 struct MapNode<'arena, K, V>
@@ -51,6 +53,8 @@ impl<'arena, K, V: Copy> MapNode<'arena, K, V> {
     }
 }
 
+/// A map of keys `K` to values `V`. The map is built as a pseudo-random
+/// binary tree with hashes of keys used for ordering.
 pub struct Map<'arena, K: 'arena, V: 'arena + Copy> {
     root: CopyCell<Option<&'arena MapNode<'arena, K, V>>>,
 }
@@ -60,6 +64,7 @@ where
     K: Eq + Hash + Copy,
     V: Copy,
 {
+    /// Create a new, empty `Map`.
     #[inline]
     pub fn new() -> Self {
         Map {
@@ -96,6 +101,7 @@ where
         }
     }
 
+    /// Inserts a key-value pair into the map.
     #[inline]
     pub fn insert(&self, arena: &'arena Arena, key: K, value: V) {
         let hash = Self::hash_key(&key);
@@ -110,6 +116,7 @@ where
         }
     }
 
+    /// Returns the value corresponding to the key.
     #[inline]
     pub fn get(&self, key: K) -> Option<V> {
         let hash = Self::hash_key(&key);
@@ -117,6 +124,7 @@ where
         self.find_slot(key, hash).get().map(|node| node.value.get())
     }
 
+    /// Returns true if the map contains a value for the specified key.
     #[inline]
     pub fn contains_key(&self, key: K) -> bool {
         let hash = Self::hash_key(&key);
@@ -124,18 +132,25 @@ where
         self.find_slot(key, hash).get().is_some()
     }
 
+    /// Returns true if the map contains no elements.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.root.get().is_none()
     }
 
+    /// Clears the map.
     #[inline]
     pub fn clear(&self) {
         self.root.set(None);
     }
 }
 
-
+/// A variant of the `Map` that includes a bloom filter using the
+/// `bloom` function for keys that can be represented as byte slices.
+///
+/// This is ideal for small maps for which querying for absent keys is
+/// a common behavior. In this case it will very likely outperform a
+/// `HashMap`, even one with a fast hashing algorithm.
 pub struct BloomMap<'arena, K: 'arena, V: 'arena + Copy> {
     filter: CopyCell<u64>,
     inner: Map<'arena, K, V>,
@@ -143,9 +158,10 @@ pub struct BloomMap<'arena, K: 'arena, V: 'arena + Copy> {
 
 impl<'arena, K, V> BloomMap<'arena, K, V>
 where
-    K: Eq + Hash + Copy + Bloom,
+    K: Eq + Hash + Copy + AsRef<[u8]>,
     V: Copy,
 {
+    /// Create a new, empty `BloomMap`.
     #[inline]
     pub fn new() -> Self {
         BloomMap {
@@ -154,15 +170,17 @@ where
         }
     }
 
+    /// Inserts a key-value pair into the map.
     #[inline]
     pub fn insert(&self, arena: &'arena Arena, key: K, value: V) {
-        self.filter.set(self.filter.get() | key.bloom());
+        self.filter.set(self.filter.get() | bloom(key.as_ref()));
         self.inner.insert(arena, key, value);
     }
 
+    /// Returns the value corresponding to the key.
     #[inline]
     pub fn get(&self, key: K) -> Option<V> {
-        let b = key.bloom();
+        let b = bloom(key.as_ref());
 
         if self.filter.get() & b == b {
             self.inner.get(key)
@@ -171,18 +189,21 @@ where
         }
     }
 
+    /// Returns true if the map contains a value for the specified key.
     #[inline]
     pub fn contains_key(&self, key: K) -> bool {
-        let b = key.bloom();
+        let b = bloom(key.as_ref());
 
         self.filter.get() & b == b && self.inner.contains_key(key)
     }
 
+    /// Returns true if the map contains no elements.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
+    /// Clears the map.
     #[inline]
     pub fn clear(&self) {
         self.filter.set(0);
