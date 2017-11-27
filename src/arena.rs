@@ -44,9 +44,7 @@ impl Arena {
     /// from it is undefined behavior.
     #[inline]
     pub unsafe fn alloc_uninitialized<'a, T: Sized + Copy>(&'a self) -> *mut T {
-        let offset = self.require(size_of::<T>());
-
-        self.ptr.get().offset(offset as isize) as *mut T
+        self.require(size_of::<T>()) as *mut T
     }
 
     /// Allocate an `&str` slice onto the arena and return a reference to it. This is
@@ -82,18 +80,7 @@ impl Arena {
     /// a well formatted string.
     pub fn alloc_str_zero_end<'a>(&'a self, val: &str) -> *const u8 {
         let len_with_zero = val.len() + 1;
-        let offset = self.offset.get();
-        let alignment = size_of::<usize>() - (len_with_zero % size_of::<usize>());
-        let cap = offset + len_with_zero + alignment;
-
-        if cap > ARENA_BLOCK {
-            let mut vec = Vec::with_capacity(len_with_zero);
-            vec.extend_from_slice(val.as_bytes());
-            vec.push(0);
-            return self.alloc_bytes(vec);
-        }
-
-        self.offset.set(cap);
+        let offset = self.require(len_with_zero);
 
         unsafe {
             use std::ptr::copy_nonoverlapping;
@@ -109,7 +96,7 @@ impl Arena {
     /// This does not copy or reallocate the original `String`.
     pub fn alloc_string<'a>(&'a self, val: String) -> &'a str {
         let len = val.len();
-        let ptr = self.alloc_bytes(val.into_bytes());
+        let ptr = self.alloc_vec(val.into_bytes());
 
         unsafe {
             use std::str::from_utf8_unchecked;
@@ -120,8 +107,8 @@ impl Arena {
     }
 
     #[inline]
-    fn alloc_bytes(&self, val: Vec<u8>) -> *const u8 {
-        let ptr = val.as_ptr();
+    fn alloc_vec(&self, mut val: Vec<u8>) -> *mut u8 {
+        let ptr = val.as_mut_ptr();
 
         let mut temp = self.store.replace(Vec::new());
         temp.push(val);
@@ -130,8 +117,23 @@ impl Arena {
         ptr
     }
 
+    fn alloc_bytes(&self, size: usize) -> *mut u8 {
+        self.alloc_vec(Vec::with_capacity(size))
+    }
+
     #[inline]
-    fn require(&self, size: usize) -> usize {
+    fn require(&self, size: usize) -> *mut u8 {
+        // This should be optimized away for size known at compile time.
+        if size > ARENA_BLOCK {
+            return self.alloc_bytes(size);
+        }
+
+        // This should also be optimized away.
+        let size = match size % size_of::<usize>() {
+            0 => size,
+            n => size + n
+        };
+
         let offset = self.offset.get();
         let cap = offset + size;
 
@@ -139,19 +141,16 @@ impl Arena {
             self.grow();
 
             self.offset.set(size);
-            0
+            self.ptr.get()
         } else {
             self.offset.set(cap);
-            offset
+            unsafe { self.ptr.get().offset(offset as isize) }
         }
     }
 
     fn grow(&self) {
-        let mut temp = self.store.replace(Vec::new());
-        let mut block = Vec::with_capacity(ARENA_BLOCK);
-        self.ptr.set(block.as_mut_ptr());
-        temp.push(block);
-        self.store.replace(temp);
+        let ptr = self.alloc_vec(Vec::with_capacity(ARENA_BLOCK));
+        self.ptr.set(ptr);
     }
 
     /// Resets the pointer to the current page of the arena.
@@ -164,5 +163,61 @@ impl Arena {
     #[inline]
     pub unsafe fn clear(&self) {
         self.offset.set(0)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn allocate_some_stuff() {
+        let arena = Arena::new();
+
+        assert_eq!(arena.alloc(0u64), &0);
+        assert_eq!(arena.alloc(42u64), &42);
+        assert_eq!(arena.alloc(0x8000000u64), &0x8000000u64);
+
+        assert_eq!(arena.offset.get(), 8 * 3);
+
+        // For inspecting internals
+        let mut arena = arena;
+
+        assert_eq!(arena.store.get_mut().len(), 1);
+    }
+
+    #[test]
+    fn allocate_huge_heap() {
+        let arena = Arena::new();
+
+        assert_eq!(arena.alloc(0u64), &0);
+        assert_eq!(arena.alloc(42u64), &42);
+
+        unsafe { arena.alloc_uninitialized::<[usize; 1024 * 1024]>() };
+
+        // Still writes to the first page
+        assert_eq!(arena.offset.get(), 8 * 2);
+        assert_eq!(arena.alloc(0x8000000u64), &0x8000000u64);
+        assert_eq!(arena.offset.get(), 8 * 3);
+
+        // For inspecting internals
+        let mut arena = arena;
+
+        // However second page has been added
+        assert_eq!(arena.store.get_mut().len(), 2);
+
+        // Second page is appropriately large
+        assert_eq!(arena.store.get_mut()[1].capacity(), size_of::<usize>() * 1024 * 1024);
+    }
+
+    #[test]
+    fn aligns_str_allocs() {
+        let arena = Arena::new();
+
+        assert_eq!(arena.alloc_str("foo"), "foo");
+        assert_eq!(arena.offset.get(), 8);
+
+        assert_eq!(arena.alloc_str("doge to the moon!"), "doge to the moon!");
+        assert_eq!(arena.offset.get(), 32);
     }
 }

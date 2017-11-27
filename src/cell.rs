@@ -10,6 +10,8 @@ pub struct CopyCell<T: Copy> {
     value: T
 }
 
+impl<T: Copy + Eq> Eq for CopyCell<T> {}
+
 impl<T: Copy> CopyCell<T> {
     /// Creates a new `CopyCell` containing the given value.
     #[inline]
@@ -63,5 +65,42 @@ impl<T: Debug + Copy> Debug for CopyCell<T> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         Debug::fmt(&self.get(), f)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn cell() {
+        let cell_a = CopyCell::new(42u64);
+        let mut cell_b = cell_a; // copy
+        let cell_c = &cell_a;    // reference
+
+        assert_eq!(cell_a.get(), 42);
+        assert_eq!(cell_b.get(), 42);
+        assert_eq!(cell_c.get(), 42);
+
+        // Only affects the copy
+        cell_b.set(100);
+
+        assert_eq!(cell_a.get(), 42);
+        assert_eq!(cell_b.get(), 100);
+        assert_eq!(cell_c.get(), 42);
+
+        // Affects a since c is a ref
+        cell_c.set(200);
+
+        assert_eq!(cell_a.get(), 200);
+        assert_eq!(cell_b.get(), 100);
+        assert_eq!(cell_c.get(), 200);
+
+        // Again, only affects the copy
+        *cell_b.get_mut() = 300;
+
+        assert_eq!(cell_a.get(), 200);
+        assert_eq!(cell_b.get(), 300);
+        assert_eq!(cell_c.get(), 200);
     }
 }

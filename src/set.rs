@@ -90,3 +90,38 @@ where
         self.map.clear()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn set() {
+        let arena = Arena::new();
+        let set = Set::new();
+
+        set.insert(&arena, "foo");
+        set.insert(&arena, "bar");
+        set.insert(&arena, "doge");
+
+        assert_eq!(set.contains("foo"), true);
+        assert_eq!(set.contains("bar"), true);
+        assert_eq!(set.contains("doge"), true);
+        assert_eq!(set.contains("moon"), false);
+    }
+
+    #[test]
+    fn bloom_set() {
+        let arena = Arena::new();
+        let set = BloomSet::new();
+
+        set.insert(&arena, "foo");
+        set.insert(&arena, "bar");
+        set.insert(&arena, "doge");
+
+        assert_eq!(set.contains("foo"), true);
+        assert_eq!(set.contains("bar"), true);
+        assert_eq!(set.contains("doge"), true);
+        assert_eq!(set.contains("moon"), false);
+    }
+}

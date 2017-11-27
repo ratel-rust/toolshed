@@ -134,3 +134,99 @@ pub fn bloom<T: AsRef<[u8]>>(val: T) -> u64 {
            | BYTE_MASKS_A[s[0] as usize] as u64
     }
 }
+
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn is_match(filter: u64, bloom: u64) -> bool {
+        filter & bloom == bloom
+    }
+
+    #[test]
+    fn produces_correct_number_of_bits() {
+        assert_eq!(bloom("").count_ones(), 1);      // just length
+        assert_eq!(bloom("a").count_ones(), 2);     // length + 1 byte
+        assert_eq!(bloom("ab").count_ones(), 3);    // length + 2 bytes
+        assert_eq!(bloom("abc").count_ones(), 4);   // length + 3 bytes
+        assert_eq!(bloom("abcd").count_ones(), 4);  // length + 3 bytes (ignore rest)
+        assert_eq!(bloom("abcde").count_ones(), 4);
+        assert_eq!(bloom("abcdef").count_ones(), 4);
+        assert_eq!(bloom("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ").count_ones(), 4);
+
+        assert_eq!(bloom("").count_ones(), 1);
+        assert_eq!(bloom("_").count_ones(), 2);
+        assert_eq!(bloom("_$").count_ones(), 3);
+        assert_eq!(bloom("_$0").count_ones(), 4);
+        assert_eq!(bloom("123").count_ones(), 4);
+        assert_eq!(bloom("456").count_ones(), 4);
+        assert_eq!(bloom("789").count_ones(), 4);
+
+        // special characters (other than `$` and `_`) are void, not to add garbage to the filter
+        assert_eq!(bloom("").count_ones(), 1);
+        assert_eq!(bloom("{").count_ones(), 1);
+        assert_eq!(bloom("{}").count_ones(), 1);
+        assert_eq!(bloom("{}[").count_ones(), 1);
+        assert_eq!(bloom("{}[]").count_ones(), 1);
+    }
+
+    #[test]
+    fn does_not_conflict_on_different_lengths() {
+        let filter = bloom("abcd") | bloom("ab");
+
+        // For visibility :)
+        const __: bool = false;
+
+        assert_eq!(is_match(filter, bloom("")), __);
+        assert_eq!(is_match(filter, bloom("a")), __);
+        assert_eq!(is_match(filter, bloom("ab")), true);
+        assert_eq!(is_match(filter, bloom("abc")), __);
+        assert_eq!(is_match(filter, bloom("abcd")), true);
+        assert_eq!(is_match(filter, bloom("abcde")), __);
+        assert_eq!(is_match(filter, bloom("abcdef")), __);
+    }
+
+    #[test]
+    fn does_not_conflict_on_letter_casing() {
+        let filter = bloom("abc") | bloom("def");
+
+        assert_eq!(is_match(filter, bloom("abc")), true);
+        assert_eq!(is_match(filter, bloom("def")), true);
+        assert_eq!(is_match(filter, bloom("ABC")), false);
+        assert_eq!(is_match(filter, bloom("DEF")), false);
+    }
+
+    #[test]
+    fn has_low_enough_conflict_rate() {
+        let filter = bloom("alloc_bytes") | bloom("alloc") | bloom("Cell") | bloom("String") | bloom("yetAnother");
+        let mut matches = 0;
+
+        assert!(is_match(filter, bloom("alloc_bytes")));
+        assert!(is_match(filter, bloom("alloc")));
+        assert!(is_match(filter, bloom("Cell")));
+        assert!(is_match(filter, bloom("String")));
+        assert!(is_match(filter, bloom("yetAnother")));
+
+        static WORDS: &[&str] = &[
+            "ARENA_BLOCK", "Arena", "Cell", "Self", "String", "T", "Vec", "_unchecked", "a",
+            "alignment", "alloc", "alloc_bytes", "alloc_str", "alloc_str_zero_end", "alloc_string",
+            "as", "as_bytes", "as_mut_ptr", "as_ptr", "block", "cap", "cell", "const",
+            "copy_nonoverlapping", "else", "extend_from_slice", "fn", "from_raw_parts", "from_utf",
+            "get", "grow", "if", "impl", "inline", "into", "into_bytes", "isize", "len",
+            "len_with_zero", "let", "mem", "mut", "new", "offset", "ptr", "pub", "push",
+            "replace", "return", "self", "set", "size_of", "slice", "std", "store", "str",
+            "struct", "temp", "u", "unsafe", "use", "usize", "val", "vec", "with_capacity"
+        ];
+
+        for word in WORDS.iter() {
+
+            if is_match(filter, bloom(word)) {
+                matches += 1;
+            }
+        }
+
+        // `yetAnother` is not in the WORDS, however there is a conflict with `Self`, which is ok!
+        assert_eq!(matches, 5);
+    }
+}

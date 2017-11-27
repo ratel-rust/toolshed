@@ -325,3 +325,137 @@ impl<'arena, T: 'arena> Iterator for ListIter<'arena, T> {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn builder() {
+        let arena = Arena::new();
+        let mut builder = ListBuilder::new(&arena, 10);
+
+        builder.push(20);
+        builder.push(30);
+
+        let list = builder.into_list();
+
+        assert!(list.iter().eq([10, 20, 30].iter()));
+    }
+
+    #[test]
+    fn empty_builder() {
+        let arena = Arena::new();
+        let mut builder = EmptyListBuilder::new(&arena);
+
+        builder.push(10);
+        builder.push(20);
+        builder.push(30);
+
+        let list = builder.into_list();
+
+        assert!(list.iter().eq([10, 20, 30].iter()));
+    }
+
+    #[test]
+    fn from_iter() {
+        let arena = Arena::new();
+        let list = List::from_iter(&arena, [10, 20, 30].iter().cloned());
+
+        assert!(list.iter().eq([10, 20, 30].iter()));
+    }
+
+    #[test]
+    fn prepend() {
+        let arena = Arena::new();
+        let list = List::from(&arena, 30);
+
+        list.prepend(&arena, 20);
+        list.prepend(&arena, 10);
+
+        assert!(list.iter().eq([10, 20, 30].iter()));
+    }
+
+    #[test]
+    fn only_element() {
+        let arena = Arena::new();
+        let list = List::from(&arena, 42);
+
+        assert_eq!(list.only_element(), Some(&42));
+
+        list.prepend(&arena, 10);
+
+        assert_eq!(list.only_element(), None);
+    }
+
+    #[test]
+    fn shift() {
+        let arena = Arena::new();
+        let mut builder = EmptyListBuilder::new(&arena);
+
+        builder.push(10);
+        builder.push(20);
+        builder.push(30);
+
+        let list = builder.into_list();
+
+        assert_eq!(list.shift(), Some(10));
+
+        assert!(list.iter().eq([20, 30].iter()));
+    }
+
+    #[test]
+    fn shift_ref() {
+        let arena = Arena::new();
+        let mut builder = EmptyListBuilder::new(&arena);
+
+        builder.push(10);
+        builder.push(20);
+        builder.push(30);
+
+        let list_a = builder.into_list();
+        let mut list_b = list_a;
+
+        assert_eq!(list_b.shift_ref(), Some(10));
+
+        assert!(list_a.iter().eq([10, 20, 30].iter()));
+        assert!(list_b.iter().eq([20, 30].iter()));
+    }
+
+    #[test]
+    fn empty_unsafe_list() {
+        let list: List<usize> = List::empty();
+        let raw = list.into_unsafe();
+
+        assert_eq!(raw.root, 0);
+
+        let list: List<usize> = unsafe { raw.into_list() };
+
+        assert_eq!(list.is_empty(), true);
+    }
+
+    #[test]
+    fn unsafe_list() {
+        let arena = Arena::new();
+
+        {
+            let list = List::from(&arena, 42usize);
+
+            drop(list);
+
+            let raw = list.into_unsafe();
+
+            assert_ne!(raw.root, 0);
+
+            let list: List<usize> = unsafe { raw.into_list() };
+
+            assert_eq!(list.only_element(), Some(&42));
+
+            // Let's be absolutely sure...
+            drop(list);
+        }
+
+        // ...that things are dropped in the right order
+        drop(arena);
+    }
+}

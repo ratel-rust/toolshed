@@ -210,3 +210,48 @@ where
         self.inner.clear();
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn map() {
+        let arena = Arena::new();
+        let map = Map::new();
+
+        map.insert(&arena, "foo", 10u64);
+        map.insert(&arena, "bar", 20);
+        map.insert(&arena, "doge", 30);
+
+        assert_eq!(map.contains_key("foo"), true);
+        assert_eq!(map.contains_key("bar"), true);
+        assert_eq!(map.contains_key("doge"), true);
+        assert_eq!(map.contains_key("moon"), false);
+
+        assert_eq!(map.get("foo"), Some(10));
+        assert_eq!(map.get("bar"), Some(20));
+        assert_eq!(map.get("doge"), Some(30));
+        assert_eq!(map.get("moon"), None);
+    }
+
+    #[test]
+    fn bloom_map() {
+        let arena = Arena::new();
+        let map = BloomMap::new();
+
+        map.insert(&arena, "foo", 10u64);
+        map.insert(&arena, "bar", 20);
+        map.insert(&arena, "doge", 30);
+
+        assert_eq!(map.contains_key("foo"), true);
+        assert_eq!(map.contains_key("bar"), true);
+        assert_eq!(map.contains_key("doge"), true);
+        assert_eq!(map.contains_key("moon"), false);
+
+        assert_eq!(map.get("foo"), Some(10));
+        assert_eq!(map.get("bar"), Some(20));
+        assert_eq!(map.get("doge"), Some(30));
+        assert_eq!(map.get("moon"), None);
+    }
+}
