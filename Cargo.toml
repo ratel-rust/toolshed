@@ -1,6 +1,6 @@
 [package]
 name = "toolshed"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["maciejhirsz <maciej.hirsz@gmail.com>"]
 license = "MIT/Apache-2.0"
 description = "Arena allocator and a handful of useful data structures"
@@ -9,3 +9,12 @@ documentation = "https://github.com/ratel-rust/toolshed"
 
 [dependencies]
 fxhash = "0.2"
+serde = { version = "1.0", optional = true }
+
+[dev-dependencies]
+serde_json = "1.0"
+
+[features]
+default = []
+
+impl_serialize = ["serde"]

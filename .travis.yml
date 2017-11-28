@@ -1,0 +1,23 @@
+language: rust
+
+rust:
+  - stable
+  - beta
+  - nightly
+
+branches:
+  except:
+    - dev
+    - benches
+
+matrix:
+  allow_failures:
+    - rust: nightly
+
+os:
+  - linux
+
+script:
+  - |
+      cargo test &&
+      cargo test --features impl_serialize

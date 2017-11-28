@@ -9,6 +9,14 @@
 
 #![warn(missing_docs)]
 
+// Pull in serde if `impl_serialize` is enabled
+#[cfg(feature = "impl_serialize")]
+extern crate serde;
+
+// Pull in serde_json for testing if `impl_serialize` is enabled
+#[cfg(all(test, feature = "impl_serialize"))]
+extern crate serde_json;
+
 extern crate fxhash;
 
 pub mod cell;
@@ -17,6 +25,9 @@ pub mod set;
 pub mod list;
 mod arena;
 mod bloom;
+
+#[cfg(feature = "impl_serialize")]
+mod serialize;
 
 pub use arena::Arena;
 pub use cell::CopyCell;
