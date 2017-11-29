@@ -2,15 +2,16 @@
 
 use Arena;
 use cell::CopyCell;
-use std::fmt::{self, Debug};
+
+const PAGE_CAP: usize = 16;
 
 /// A single-ended linked list.
 #[derive(Clone)]
-pub struct List<'arena, T: 'arena> {
-    root: CopyCell<Option<&'arena ListItem<'arena, T>>>,
+pub struct List<'arena, T: 'arena + Copy> {
+    root: CopyCell<Option<&'arena ListPage<'arena, T>>>,
 }
 
-impl<'arena, T: 'arena> List<'arena, T> {
+impl<'arena, T: 'arena + Copy> List<'arena, T> {
     /// Create a new empty `List`.
     #[inline]
     pub fn empty() -> Self {
@@ -19,20 +20,14 @@ impl<'arena, T: 'arena> List<'arena, T> {
         }
     }
 
-    /// Turns the list into an empty list.
-    ///
-    /// Internally, all this method does is removing the reference to the
-    /// first item on the list.
-    #[inline]
-    pub fn clear(&self) {
-        self.root.set(None);
-    }
-
     /// Returns an iterator over the items in the list.
     #[inline]
     pub fn iter(&self) -> ListIter<'arena, T> {
         ListIter {
-            next: self.root.get()
+            index: 0,
+            page: self.root.get().unwrap_or_else(|| unsafe {
+                empty_page()
+            })
         }
     }
 
@@ -47,13 +42,18 @@ impl<'arena, T: 'arena> List<'arena, T> {
     #[inline]
     pub fn only_element(&self) -> Option<&'arena T> {
         match self.root.get() {
-            Some(&ListItem {
-                ref value,
-                ref next,
-                ..
-            }) if next.get().is_none() => Some(value),
-            _                          => None
+            Some(list) if list.len() == 1 => Some(list.value(0).get_ref()),
+            _                             => None,
         }
+    }
+
+    /// Turns the list into an empty list.
+    ///
+    /// Internally, all this method does is removing the reference to the
+    /// first item on the list.
+    #[inline]
+    pub fn clear(&self) {
+        self.root.set(None);
     }
 
     /// Returns an `UnsafeList` for the current `List`. While this function is
@@ -62,22 +62,22 @@ impl<'arena, T: 'arena> List<'arena, T> {
     pub fn into_unsafe(self) -> UnsafeList {
         UnsafeList {
             root: match self.root.get() {
-                Some(ptr) => ptr as *const ListItem<'arena, T> as usize,
+                Some(ptr) => ptr as *const ListPage<'arena, T> as usize,
                 None      => 0
             }
         }
     }
-}
 
-impl<'arena, T: 'arena + Copy> List<'arena, T> {
     /// Create a single-element list from the given value.
     #[inline]
     pub fn from(arena: &'arena Arena, value: T) -> List<'arena, T> {
+        let page = ListPage::new(arena);
+
+        unsafe { page.values.get_unchecked(0) }.set(value);
+        page.length.set(1);
+
         List {
-            root: CopyCell::new(Some(arena.alloc(ListItem {
-                value,
-                next: CopyCell::new(None)
-            })))
+            root: CopyCell::new(Some(page))
         }
     }
 
@@ -85,67 +85,21 @@ impl<'arena, T: 'arena + Copy> List<'arena, T> {
     pub fn from_iter<I>(arena: &'arena Arena, source: I) -> List<'arena, T> where
         I: IntoIterator<Item = T>
     {
-        let mut iter = source.into_iter();
+        let mut builder = ListBuilder::new(arena);
 
-        let mut builder = match iter.next() {
-            Some(item) => ListBuilder::new(arena, item),
-            None       => return List::empty(),
-        };
-
-        for item in iter {
+        for item in source {
             builder.push(item);
         }
 
         builder.into_list()
     }
-
-    /// Adds a new element to the beginning of the list.
-    #[inline]
-    pub fn prepend(&self, arena: &'arena Arena, value: T) {
-        self.root.set(Some(arena.alloc(
-            ListItem {
-                value,
-                next: self.root
-            }
-        )));
-    }
-
-    /// Removes the first element from the list and returns it.
-    #[inline]
-    pub fn shift(&self) -> Option<T> {
-        let list_item = match self.root.get() {
-            None => return None,
-            Some(list_item) => list_item
-        };
-
-        self.root.set(list_item.next.get());
-
-        Some(list_item.value)
-    }
-
-    /// Get the first element of the `List`, if any, then create a
-    /// new `List` starting from the second element at the reference to
-    /// the old list.
-    ///
-    /// Note: This does not modify the internal state of the `List`.
-    ///       If you wish to modify the list use `shift` instead.
-    #[inline]
-    pub fn shift_ref(&mut self) -> Option<T> {
-        let list_item = match self.root.get() {
-            None => return None,
-            Some(list_item) => list_item
-        };
-
-        *self = List {
-            root: list_item.next
-        };
-
-        Some(list_item.value)
-    }
 }
 
 
-impl<'arena, T: 'arena> IntoIterator for List<'arena, T> {
+impl<'arena, T> IntoIterator for List<'arena, T>
+where
+    T: 'arena + Copy,
+{
     type Item = &'arena T;
     type IntoIter = ListIter<'arena, T>;
 
@@ -155,7 +109,10 @@ impl<'arena, T: 'arena> IntoIterator for List<'arena, T> {
     }
 }
 
-impl<'a, 'arena, T: 'arena> IntoIterator for &'a List<'arena, T> {
+impl<'a, 'arena, T> IntoIterator for &'a List<'arena, T>
+where
+    T: 'arena + Copy,
+{
     type Item = &'arena T;
     type IntoIter = ListIter<'arena, T>;
 
@@ -167,107 +124,135 @@ impl<'a, 'arena, T: 'arena> IntoIterator for &'a List<'arena, T> {
 
 impl<'arena, T: Copy> Copy for List<'arena, T> { }
 
+// Get a pointer to a ListPage of an arbitrary type T. This is meant to be used
+// as a read-only value, and only for the 0-length.
+//
+// The actual allocated memory will likely not match the type T. The **only**
+// assumption the user of this function can make is that the length is set,
+// and that it is set to `0`. Anything else is likely a SEGFAULT or UD.
+unsafe fn empty_page<'a, T>() -> &'a ListPage<'a, T>
+where
+    T: 'a + Copy,
+{
+    // This static stores a pointer, usize makes things easier
+    static mut EMPTY_PAGE: Option<usize> = None;
+
+    let ptr = match EMPTY_PAGE {
+        None => {
+            // Allocate 3 0-initialized words on the heap, get pointer as usize
+            let ptr = Box::into_raw(Box::new([0usize; 3])) as usize;
+
+            // Poor man's lazy_static (and no, lazy_static wouldn't work, because !Sync)
+            EMPTY_PAGE = Some(ptr);
+            ptr
+        },
+        Some(ptr) => ptr
+    };
+
+    // We don't know what the size of T is. The catch is that we only need to read length,
+    // which with the #[repr(C)] should always be the first word!
+    &*(ptr as *const ListPage<'a, T>)
+}
+
 #[derive(Debug, PartialEq, Clone)]
-struct ListItem<'arena, T: 'arena> {
-    value: T,
-    next: CopyCell<Option<&'arena ListItem<'arena, T>>>,
+#[repr(C)]
+struct ListPage<'arena, T: 'arena + Copy> {
+    length: CopyCell<usize>,
+    values: [CopyCell<T>; PAGE_CAP],
+    next: CopyCell<&'arena ListPage<'arena, T>>,
 }
 
-impl<'arena, T: Copy> Copy for ListItem<'arena, T> {}
+impl<'arena, T: Copy> Copy for ListPage<'arena, T> {}
 
-/// A builder struct that allows to push elements onto the end of the list.
-pub struct ListBuilder<'arena, T: 'arena + Copy> {
-    arena: &'arena Arena,
-    first: &'arena ListItem<'arena, T>,
-    last: &'arena ListItem<'arena, T>,
-}
-
-impl<'arena, T: 'arena + Copy> ListBuilder<'arena, T> {
-    /// Create a new builder with the first element.
+impl<'arena, T: Copy> ListPage<'arena, T> {
     #[inline]
-    pub fn new(arena: &'arena Arena, first: T) -> Self {
-        let first = arena.alloc(ListItem {
-            value: first,
-            next: CopyCell::new(None)
-        });
-
-        ListBuilder {
-            arena,
-            first,
-            last: first
-        }
+    fn new(arena: &'arena Arena) -> &'arena ListPage<'arena, T> {
+        let page = unsafe { arena.alloc_uninitialized::<ListPage<'arena, T>>() };
+        page.length = CopyCell::new(0);
+        page
     }
 
-    /// Push a new item at the end of the `List`.
     #[inline]
-    pub fn push(&mut self, item: T) {
-        let next = self.arena.alloc(ListItem {
-            value: item,
-            next: CopyCell::new(None)
-        });
-
-        self.last.next.set(Some(next));
-        self.last = next;
+    fn has_capacity(&self) -> bool {
+        self.len() != PAGE_CAP
     }
 
-    /// Consume the builder and return a `List`.
     #[inline]
-    pub fn into_list(self) -> List<'arena, T> {
-        List {
-            root: CopyCell::new(Some(self.first))
-        }
+    fn push(&self, value: T) {
+        debug_assert!(self.has_capacity());
+
+        self.value(self.len()).set(value);
+        self.length.set(self.len() + 1);
+    }
+
+    #[inline]
+    fn value(&self, index: usize) -> &CopyCell<T> {
+        unsafe { &self.values.get_unchecked(index) }
+    }
+
+    #[inline]
+    fn len(&self) -> usize {
+        self.length.get()
     }
 }
 
 /// A builder struct that allows to push elements onto the end of the list.
-///
-/// This is essentially identical to `ListBuilder` in purpose, but ever so
-/// slightly slower since an extra check has to be performed on each `push`.
-pub struct EmptyListBuilder<'arena, T: 'arena + Copy> {
+pub struct ListBuilder<'arena, T>
+where
+    T: 'arena + Copy,
+{
     arena: &'arena Arena,
-    first: Option<&'arena ListItem<'arena, T>>,
-    last: Option<&'arena ListItem<'arena, T>>,
+    first: &'arena ListPage<'arena, T>,
+    last: &'arena ListPage<'arena, T>,
 }
 
-impl<'arena, T: 'arena + Copy> EmptyListBuilder<'arena, T> {
+impl<'arena, T> ListBuilder<'arena, T>
+where
+    T: 'arena + Copy,
+{
     /// Create a new builder.
     #[inline]
     pub fn new(arena: &'arena Arena) -> Self {
-        EmptyListBuilder {
+        let page = ListPage::new(arena);
+
+        ListBuilder {
             arena,
-            first: None,
-            last: None,
+            first: page,
+            last: page,
         }
+    }
+
+    #[inline]
+    fn get_page(&mut self) -> &'arena ListPage<'arena, T> {
+        if !self.last.has_capacity() {
+            let page = ListPage::new(self.arena);
+
+            // Set the capacity at it's limit
+            self.last.length.set(self.last.len() + 1);
+            self.last.next.set(page);
+
+            self.last = page;
+        }
+
+        self.last
     }
 
     /// Push a new item at the end of the `List`.
     #[inline]
     pub fn push(&mut self, item: T) {
-        match self.last {
-            None => {
-                self.first = Some(self.arena.alloc(ListItem {
-                    value: item,
-                    next: CopyCell::new(None)
-                }));
-                self.last = self.first;
-            },
-            Some(ref mut last) => {
-                let next = self.arena.alloc(ListItem {
-                    value: item,
-                    next: CopyCell::new(None)
-                });
-
-                last.next.set(Some(next));
-                *last = next;
-            }
-        }
+        self.get_page().push(item)
     }
 
     /// Consume the builder and return a `List`.
     #[inline]
     pub fn into_list(self) -> List<'arena, T> {
+        let page = match self.first.len() {
+            0 => None,
+            _ => Some(self.first),
+        };
+
         List {
-            root: CopyCell::new(self.first)
+            root: CopyCell::new(page)
         }
     }
 }
@@ -282,47 +267,55 @@ impl UnsafeList {
     /// Converts the `UnsafeList` into a regular `List`. Using this with
     /// incorrect lifetimes of after the original arena has been dropped
     /// will lead to undefined behavior. Use with extreme care.
-    pub unsafe fn into_list<'arena, T: 'arena>(self) -> List<'arena, T> {
+    pub unsafe fn into_list<'arena, T>(self) -> List<'arena, T>
+    where
+        T: 'arena + Copy,
+    {
         List {
             root: CopyCell::new(match self.root {
                 0   => None,
-                ptr => Some(&*(ptr as *const ListItem<'arena, T>))
+                ptr => Some(&*(ptr as *const ListPage<'arena, T>))
             })
         }
     }
 }
 
-impl<'arena, T: 'arena + PartialEq> PartialEq for List<'arena, T> {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.iter().eq(other.iter())
-    }
-}
-
-impl<'arena, T: 'arena + Debug> Debug for List<'arena, T> {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_list().entries(self.iter()).finish()
-    }
-}
-
 /// An iterator over the items in the list.
-pub struct ListIter<'arena, T: 'arena> {
-    next: Option<&'arena ListItem<'arena, T>>
+pub struct ListIter<'arena, T>
+where
+    T: 'arena + Copy,
+{
+    index: usize,
+    page: &'arena ListPage<'arena, T>
 }
 
-impl<'arena, T: 'arena> Iterator for ListIter<'arena, T> {
+impl<'arena, T> Iterator for ListIter<'arena, T>
+where
+    T: 'arena + Copy,
+{
     type Item = &'arena T;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let next = self.next;
+        // Iterate on the current page
+        if self.index != self.page.len() {
+            let value = self.page.value(self.index).get_ref();
 
-        next.map(|list_item| {
-            let value = &list_item.value;
-            self.next = list_item.next.get();
-            value
-        })
+            self.index += 1;
+
+            return Some(value);
+        }
+
+        // Jump to the next page
+        if self.page.len() == PAGE_CAP {
+            self.page = self.page.next.get();
+            self.index = 1;
+
+            return Some(self.page.value(0).get_ref())
+        }
+
+        // This is the end
+        None
     }
 }
 
@@ -333,8 +326,9 @@ mod test {
     #[test]
     fn builder() {
         let arena = Arena::new();
-        let mut builder = ListBuilder::new(&arena, 10);
+        let mut builder = ListBuilder::new(&arena);
 
+        builder.push(10);
         builder.push(20);
         builder.push(30);
 
@@ -344,17 +338,27 @@ mod test {
     }
 
     #[test]
-    fn empty_builder() {
+    fn empty_iterator() {
+        // Test with a big-ish type
+        let list = List::<(usize, f64, u64)>::empty();
+        let mut iter = list.iter();
+
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn unsafe_empty_page() {
+        let page = unsafe { empty_page::<ListPage<(usize, f64, u64)>>() };
+
+        assert_eq!(page.len(), 0);
+    }
+
+    #[test]
+    fn from_value() {
         let arena = Arena::new();
-        let mut builder = EmptyListBuilder::new(&arena);
+        let list = List::from(&arena, 10);
 
-        builder.push(10);
-        builder.push(20);
-        builder.push(30);
-
-        let list = builder.into_list();
-
-        assert!(list.iter().eq([10, 20, 30].iter()));
+        assert!(list.iter().eq([10].iter()));
     }
 
     #[test]
@@ -366,60 +370,15 @@ mod test {
     }
 
     #[test]
-    fn prepend() {
-        let arena = Arena::new();
-        let list = List::from(&arena, 30);
-
-        list.prepend(&arena, 20);
-        list.prepend(&arena, 10);
-
-        assert!(list.iter().eq([10, 20, 30].iter()));
-    }
-
-    #[test]
     fn only_element() {
         let arena = Arena::new();
         let list = List::from(&arena, 42);
 
         assert_eq!(list.only_element(), Some(&42));
 
-        list.prepend(&arena, 10);
+        let list = List::from_iter(&arena, [42, 42].iter().cloned());
 
         assert_eq!(list.only_element(), None);
-    }
-
-    #[test]
-    fn shift() {
-        let arena = Arena::new();
-        let mut builder = EmptyListBuilder::new(&arena);
-
-        builder.push(10);
-        builder.push(20);
-        builder.push(30);
-
-        let list = builder.into_list();
-
-        assert_eq!(list.shift(), Some(10));
-
-        assert!(list.iter().eq([20, 30].iter()));
-    }
-
-    #[test]
-    fn shift_ref() {
-        let arena = Arena::new();
-        let mut builder = EmptyListBuilder::new(&arena);
-
-        builder.push(10);
-        builder.push(20);
-        builder.push(30);
-
-        let list_a = builder.into_list();
-        let mut list_b = list_a;
-
-        assert_eq!(list_b.shift_ref(), Some(10));
-
-        assert!(list_a.iter().eq([10, 20, 30].iter()));
-        assert!(list_b.iter().eq([20, 30].iter()));
     }
 
     #[test]

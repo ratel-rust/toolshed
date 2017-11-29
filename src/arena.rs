@@ -43,8 +43,8 @@ impl Arena {
     /// Memory behind the pointer is uninitialized, can contain garbage and reading
     /// from it is undefined behavior.
     #[inline]
-    pub unsafe fn alloc_uninitialized<'a, T: Sized + Copy>(&'a self) -> *mut T {
-        self.require(size_of::<T>()) as *mut T
+    pub unsafe fn alloc_uninitialized<'a, T: Sized + Copy>(&'a self) -> &'a mut T {
+        &mut *(self.require(size_of::<T>()) as *mut T)
     }
 
     /// Allocate an `&str` slice onto the arena and return a reference to it. This is
@@ -164,6 +164,9 @@ impl Arena {
         self.offset.set(0)
     }
 }
+
+/// Akin to `CopyCell`: `Sync` is unsafe but `Send` is totally fine!
+unsafe impl Send for Arena {}
 
 #[cfg(test)]
 mod test {

@@ -7,20 +7,93 @@ For all those times when you need to create a recursively nested tree
 of `enum`s and find yourself in pain having to put everything in
 `Box`es all the time.
 
+## Features
+
++ Paginated `Arena`: internally preallocates 64KiB _pages_ on the heap and
+    allows `Copy` types to be put on that heap.
+
++ `CopyCell`: virtually identical to `std::cell::Cell` but requires that
+    internal types implement `Copy`, and implements `Copy` itself.
+
++ `List`, `Map` and `Set`: your basic data structures that allocate on the
+    `Arena` and use internal mutability via `CopyCell`. Never worry about
+    sharing pointers again!
+
++ `BloomMap` and `BloomSet`: special variants of `Map` and `Set` with a
+    very simple but very fast bloom filter. If a map / set is often queried
+    for keys / elements it doesn't contain, the bloom filter check will
+    reduce the need to do a full tree lookup, greatly increasing performance.
+    The overhead compared to a regular `Map` or `Set` is also minimal.
+
++ All data structures implement expected traits, such as `Debug` or `PartialEq`.
+
++ Optional **serde** `Serialize` support behind a feature flag.
+
+## Example
+
+```rust
+
+extern crate toolshed;
+
+use toolshed::Arena;
+use toolshed::map::Map;
+
+// Only `Copy` types can be allocated on the `Arena`!
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum Foo<'arena> {
+    Integer(u64),
+
+    // Recursive enum without `Box`es!
+    Nested(&'arena Foo<'arena>),
+}
+
+fn main() {
+    // Create a new arena
+    let arena = Arena::new();
+
+    // The reference will live until `arena` goes out of scope
+    let child = arena.alloc(Foo::Integer(42));
+    let parent = arena.alloc(Foo::Nested(child));
+
+    // Empty map does not allocate
+    let map = Map::new();
+
+    // Inserting stuff in the map requires a reference to the `Arena`.
+    // The reference can be shared, since `Arena` uses interior mutability.
+    map.insert(&arena, "child", child);
+
+    // We can put our `map` on the arena as well.
+    let map: &Map<&str, &Foo> = arena.alloc(map);
+
+    // Each insert allocates a small chunk of data on the arena. Since arena is
+    // preallocated on the heap, these inserts are very, very fast.
+    //
+    // We only have a non-mutable reference to `map` now, however `Map` is also
+    // using interior mutability on references to allow exactly this kind of
+    // behavior in a safe manner.
+    map.insert(&arena, "parent", parent);
+
+    assert_eq!(map.get("child"), Some(&Foo::Integer(42)));
+    assert_eq!(map.get("parent"), Some(&Foo::Nested(&Foo::Integer(42))));
+    assert_eq!(map.get("heh"), None);
+}
+
+```
+
 ## Benches
 
-Here is a very nonobjective test of the different sets as an example:
+Here is a very biased benchmark of the different sets:
 
 ```
 running 8 tests
-test bloom_set_create  ... bench:          44 ns/iter (+/- 0)
-test bloom_set_read    ... bench:         182 ns/iter (+/- 1)
-test fxhash_set_create ... bench:          88 ns/iter (+/- 1)
-test fxhash_set_read   ... bench:         312 ns/iter (+/- 26)
-test hash_set_create   ... bench:         153 ns/iter (+/- 1)
-test hash_set_read     ... bench:       1,123 ns/iter (+/- 2)
-test set_create        ... bench:          33 ns/iter (+/- 0)
-test set_read          ... bench:         442 ns/iter (+/- 2)
+test bloom_set_create  ... bench:          49 ns/iter (+/- 0)
+test bloom_set_read    ... bench:         181 ns/iter (+/- 10)
+test fxhash_set_create ... bench:          86 ns/iter (+/- 1)
+test fxhash_set_read   ... bench:         312 ns/iter (+/- 4)
+test hash_set_create   ... bench:         152 ns/iter (+/- 94)
+test hash_set_read     ... bench:       1,105 ns/iter (+/- 1)
+test set_create        ... bench:          37 ns/iter (+/- 0)
+test set_read          ... bench:         440 ns/iter (+/- 1)
 ```
 
 * `set` and `bloom_set` are benchmarks of `Set` and `BloomSet` from this crate.

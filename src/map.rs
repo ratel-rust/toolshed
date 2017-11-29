@@ -19,6 +19,7 @@ where
     pub value: CopyCell<V>,
     pub left: CopyCell<Option<&'arena MapNode<'arena, K, V>>>,
     pub right: CopyCell<Option<&'arena MapNode<'arena, K, V>>>,
+    pub next: CopyCell<Option<&'arena MapNode<'arena, K, V>>>,
 }
 
 impl<'arena, K: Debug, V: Debug + Copy> Debug for MapNode<'arena, K, V> {
@@ -49,14 +50,20 @@ impl<'arena, K, V: Copy> MapNode<'arena, K, V> {
             value: CopyCell::new(value),
             left: CopyCell::new(None),
             right: CopyCell::new(None),
+            next: CopyCell::new(None),
         }
     }
 }
 
 /// A map of keys `K` to values `V`. The map is built as a pseudo-random
-/// binary tree with hashes of keys used for ordering.
+/// binary tree with hashes of keys used for balancing the tree nodes.
+///
+/// All the nodes of the map are also linked to allow iteration in
+/// insertion order.
+#[derive(Clone, Copy)]
 pub struct Map<'arena, K: 'arena, V: 'arena + Copy> {
     root: CopyCell<Option<&'arena MapNode<'arena, K, V>>>,
+    last: CopyCell<Option<&'arena MapNode<'arena, K, V>>>,
 }
 
 impl<'arena, K, V> Map<'arena, K, V>
@@ -69,6 +76,15 @@ where
     pub fn new() -> Self {
         Map {
             root: CopyCell::new(None),
+            last: CopyCell::new(None),
+        }
+    }
+
+    /// Get an iterator over key value pairs.
+    #[inline]
+    pub fn iter(&self) -> MapIter<'arena, K, V> {
+        MapIter {
+            next: self.root.get()
         }
     }
 
@@ -101,17 +117,29 @@ where
         }
     }
 
-    /// Inserts a key-value pair into the map.
+    /// Inserts a key-value pair into the map. If the key was previously set,
+    /// old value is returned.
     #[inline]
-    pub fn insert(&self, arena: &'arena Arena, key: K, value: V) {
+    pub fn insert(&self, arena: &'arena Arena, key: K, value: V) -> Option<V> {
         let hash = Self::hash_key(&key);
         let node = self.find_slot(key, hash);
 
         match node.get() {
-            Some(node) => node.value.set(value),
+            Some(node) => {
+                let old = node.value.get();
+                node.value.set(value);
+                Some(old)
+            },
             None => {
-                let new = arena.alloc(MapNode::new(key, hash, value));
-                node.set(Some(new));
+                let new = Some(arena.alloc(MapNode::new(key, hash, value)));
+
+                if let Some(last) = self.last.get() {
+                    last.next.set(new);
+                }
+
+                self.last.set(new);
+                node.set(new);
+                None
             }
         }
     }
@@ -151,6 +179,7 @@ where
 /// This is ideal for small maps for which querying for absent keys is
 /// a common behavior. In this case it will very likely outperform a
 /// `HashMap`, even one with a fast hashing algorithm.
+#[derive(Clone, Copy)]
 pub struct BloomMap<'arena, K: 'arena, V: 'arena + Copy> {
     filter: CopyCell<u64>,
     inner: Map<'arena, K, V>,
@@ -170,11 +199,18 @@ where
         }
     }
 
-    /// Inserts a key-value pair into the map.
+    /// Get an iterator over key value pairs.
     #[inline]
-    pub fn insert(&self, arena: &'arena Arena, key: K, value: V) {
-        self.filter.set(self.filter.get() | bloom(key.as_ref()));
-        self.inner.insert(arena, key, value);
+    pub fn iter(&self) -> MapIter<'arena, K, V> {
+        self.inner.iter()
+    }
+
+    /// Inserts a key-value pair into the map. If the key was previously set,
+    /// old value is returned.
+    #[inline]
+    pub fn insert(&self, arena: &'arena Arena, key: K, value: V) -> Option<V> {
+        self.filter.set(self.filter.get() | bloom(key));
+        self.inner.insert(arena, key, value)
     }
 
     /// Returns the value corresponding to the key.
@@ -192,7 +228,7 @@ where
     /// Returns true if the map contains a value for the specified key.
     #[inline]
     pub fn contains_key(&self, key: K) -> bool {
-        let b = bloom(key.as_ref());
+        let b = bloom(key);
 
         self.filter.get() & b == b && self.inner.contains_key(key)
     }
@@ -208,6 +244,94 @@ where
     pub fn clear(&self) {
         self.filter.set(0);
         self.inner.clear();
+    }
+}
+
+/// An iterator over the entries in the map.
+/// All entries are returned in insertion order.
+pub struct MapIter<'arena, K, V>
+where
+    K: 'arena,
+    V: 'arena + Copy,
+{
+    next: Option<&'arena MapNode<'arena, K, V>>
+}
+
+impl<'arena, K, V> Iterator for MapIter<'arena, K, V>
+where
+    K: 'arena,
+    V: 'arena + Copy,
+{
+    type Item = (&'arena K, V);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.next;
+
+        next.map(|map_node| {
+            let key = &map_node.key;
+            let value = map_node.value.get();
+            self.next = map_node.next.get();
+            (key, value)
+        })
+    }
+}
+
+impl<'arena, K, V> IntoIterator for Map<'arena, K, V>
+where
+    K: 'arena + Eq + Hash + Copy,
+    V: 'arena + Copy,
+{
+    type Item = (&'arena K, V);
+    type IntoIter = MapIter<'arena, K, V>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'arena, K, V> IntoIterator for BloomMap<'arena, K, V>
+where
+    K: 'arena + Eq + Hash + Copy + AsRef<[u8]>,
+    V: 'arena + Copy,
+{
+    type Item = (&'arena K, V);
+    type IntoIter = MapIter<'arena, K, V>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'arena, K, V> From<Map<'arena, K, V>> for BloomMap<'arena, K, V>
+where
+    K: 'arena + Eq + Hash + Copy + AsRef<[u8]>,
+    V: 'arena + Copy,
+{
+    fn from(map: Map<'arena, K, V>) -> BloomMap<'arena, K, V> {
+        let mut filter = 0;
+
+        for (key, _) in map.iter() {
+            filter |= bloom(key.as_ref());
+        }
+
+        BloomMap {
+            filter: CopyCell::new(filter),
+            inner: map,
+        }
+    }
+}
+
+impl<'arena, K, V> From<BloomMap<'arena, K, V>> for Map<'arena, K, V>
+where
+    K: 'arena + Eq + Hash + Copy + AsRef<[u8]>,
+    V: 'arena + Copy,
+{
+    #[inline]
+    fn from(bloom_map: BloomMap<'arena, K, V>) -> Map<'arena, K, V> {
+        bloom_map.inner
     }
 }
 
@@ -253,5 +377,67 @@ mod test {
         assert_eq!(map.get("bar"), Some(20));
         assert_eq!(map.get("doge"), Some(30));
         assert_eq!(map.get("moon"), None);
+    }
+
+    #[test]
+    fn iter() {
+        let arena = Arena::new();
+        let map = Map::new();
+
+        map.insert(&arena, "foo", 10u64);
+        map.insert(&arena, "bar", 20);
+        map.insert(&arena, "doge", 30);
+
+        let mut iter = map.iter();
+
+        assert_eq!(iter.next(), Some((&"foo", 10)));
+        assert_eq!(iter.next(), Some((&"bar", 20)));
+        assert_eq!(iter.next(), Some((&"doge", 30)));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn insert_replace() {
+        let arena = Arena::new();
+        let map = Map::new();
+
+        map.insert(&arena, "foo", 10u64);
+        map.insert(&arena, "bar", 20);
+        map.insert(&arena, "doge", 30);
+
+        let mut iter = map.iter();
+
+        assert_eq!(iter.next(), Some((&"foo", 10)));
+        assert_eq!(iter.next(), Some((&"bar", 20)));
+        assert_eq!(iter.next(), Some((&"doge", 30)));
+        assert_eq!(iter.next(), None);
+
+        map.insert(&arena, "bar", 42);
+
+        let mut iter = map.iter();
+
+        assert_eq!(iter.next(), Some((&"foo", 10)));
+        assert_eq!(iter.next(), Some((&"bar", 42)));
+        assert_eq!(iter.next(), Some((&"doge", 30)));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn from_eq() {
+        let arena = Arena::new();
+        let map = Map::new();
+
+        map.insert(&arena, "foo", 10);
+        map.insert(&arena, "bar", 20);
+        map.insert(&arena, "doge", 30);
+
+        let bloom_map = BloomMap::new();
+
+        bloom_map.insert(&arena, "foo", 10);
+        bloom_map.insert(&arena, "bar", 20);
+        bloom_map.insert(&arena, "doge", 30);
+
+        assert_eq!(map, Map::from(bloom_map));
+        assert_eq!(BloomMap::from(map), bloom_map);
     }
 }

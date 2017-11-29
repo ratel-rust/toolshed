@@ -1,14 +1,24 @@
 //! A mutable memory location for `Copy` types.
 
 use std::fmt::{self, Debug};
+use std::marker::PhantomData;
 
 /// This should be identical to the `Cell` implementation in the standard
 /// library, but always require that the internal type implements `Copy`
 /// and implements `Copy` itself.
 #[derive(PartialEq)]
 pub struct CopyCell<T: Copy> {
-    value: T
+    /// Internal value
+    pub(crate) value: T,
+
+    /// We trick the compiler to think that `CopyCell` contains a raw pointer,
+    /// this way we make sure the `Sync` marker is not implemented and `CopyCell`
+    /// cannot be shared across threads!
+    pub(crate) _no_sync: PhantomData<*mut T>
 }
+
+/// `Sync` is unsafe due to mutability, however `Send` is totally fine!
+unsafe impl<T: Copy> Send for CopyCell<T> {}
 
 impl<T: Copy + Eq> Eq for CopyCell<T> {}
 
@@ -17,7 +27,8 @@ impl<T: Copy> CopyCell<T> {
     #[inline]
     pub fn new(value: T) -> Self {
         CopyCell {
-            value
+            value,
+            _no_sync: PhantomData
         }
     }
 
@@ -32,6 +43,11 @@ impl<T: Copy> CopyCell<T> {
         unsafe {
             *self.mut_ptr()
         }
+    }
+
+    #[inline]
+    pub(crate) fn get_ref(&self) -> &T {
+        &self.value
     }
 
     /// Returns a mutable reference to the underlying data.
