@@ -1,6 +1,6 @@
 [package]
 name = "toolshed"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["maciejhirsz <maciej.hirsz@gmail.com>"]
 license = "MIT/Apache-2.0"
 description = "Arena allocator and a handful of useful data structures"
@@ -8,7 +8,7 @@ repository = "https://github.com/ratel-rust/toolshed"
 documentation = "https://docs.rs/toolshed/"
 
 [dependencies]
-fxhash = "0.2.1"
+fxhash = "0.2"
 serde = { version = "1.0", optional = true }
 
 [dev-dependencies]
