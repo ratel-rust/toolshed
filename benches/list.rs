@@ -19,11 +19,13 @@ static WORDS: &[&str] = &[
 ];
 
 #[bench]
-fn vec_create(b: &mut Bencher) {
+fn vec_create_016(b: &mut Bencher) {
+    let words = &WORDS[..16];
+
     b.iter(|| {
         let mut vec = Vec::new();
 
-        for word in WORDS.iter() {
+        for word in words.iter() {
             vec.push(word);
         }
 
@@ -32,18 +34,113 @@ fn vec_create(b: &mut Bencher) {
 }
 
 #[bench]
-fn list_create(b: &mut Bencher) {
-    use toolshed::new_list::ListBuilder;
+fn vec_create_032(b: &mut Bencher) {
+    let words = &WORDS[..32];
 
+    b.iter(|| {
+        let mut vec = Vec::new();
+
+        for word in words.iter() {
+            vec.push(word);
+        }
+
+        black_box(vec);
+    })
+}
+
+#[bench]
+fn vec_create_064(b: &mut Bencher) {
+    let words = &WORDS[..64];
+
+    b.iter(|| {
+        let mut vec = Vec::new();
+
+        for word in words.iter() {
+            vec.push(word);
+        }
+
+        black_box(vec);
+    })
+}
+
+#[bench]
+fn vec_create_256(b: &mut Bencher) {
+    b.iter(|| {
+        let mut vec = Vec::new();
+
+        for i in 0..256usize {
+            vec.push((i, i));
+        }
+
+        black_box(vec);
+    })
+}
+
+#[bench]
+fn list_create_016(b: &mut Bencher) {
+    let arena = Arena::new();
+    let a     = &arena;
+    let words = &WORDS[1..16];
+
+    b.iter(|| {
+        unsafe { a.clear() };
+        let mut builder = ListBuilder::new(a, WORDS[0]);
+
+        for word in words.iter() {
+            builder.push(*word);
+        }
+
+        black_box(builder.into_list());
+    })
+}
+
+#[bench]
+fn list_create_032(b: &mut Bencher) {
+    let arena = Arena::new();
+    let a     = &arena;
+    let words = &WORDS[1..32];
+
+    b.iter(|| {
+        unsafe { a.clear() };
+        let mut builder = ListBuilder::new(a, WORDS[0]);
+
+        for word in words.iter() {
+            builder.push(*word);
+        }
+
+        black_box(builder.into_list());
+    })
+}
+
+#[bench]
+fn list_create_064(b: &mut Bencher) {
+    let arena = Arena::new();
+    let a     = &arena;
+    let words = &WORDS[1..64];
+
+    b.iter(|| {
+        unsafe { a.clear() };
+        let mut builder = ListBuilder::new(a, WORDS[0]);
+
+        for word in words.iter() {
+            builder.push(*word);
+        }
+
+        black_box(builder.into_list());
+    })
+}
+
+#[bench]
+fn list_create_256(b: &mut Bencher) {
     let arena = Arena::new();
     let a     = &arena;
 
     b.iter(|| {
         unsafe { a.clear() };
-        let mut builder = ListBuilder::new(a);
+        let mut builder = ListBuilder::new(a, (0usize, 0));
 
-        for word in WORDS.iter() {
-            builder.push(*word);
+        for i in 1..256usize {
+            builder.push((i, i));
         }
 
         black_box(builder.into_list());

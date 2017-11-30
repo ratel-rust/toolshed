@@ -19,5 +19,5 @@ os:
 
 script:
   - |
-      cargo test &&
-      cargo test --features impl_serialize
+      cargo test --features impl_serialize &&
+      cargo test --features impl_serialize --release

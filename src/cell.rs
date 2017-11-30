@@ -45,14 +45,10 @@ impl<T: Copy> CopyCell<T> {
         }
     }
 
-    #[inline]
-    pub(crate) fn get_ref(&self) -> &T {
-        &self.value
-    }
-
     /// Returns a mutable reference to the underlying data.
     ///
-    /// This call borrows `CopyCell` mutably (at compile-time) which guarantees that we possess the only reference.
+    /// This call borrows `CopyCell` mutably, which gives us a compile time
+    /// memory safety guarantee.
     #[inline]
     pub fn get_mut(&mut self) -> &mut T {
         unsafe {
@@ -63,8 +59,12 @@ impl<T: Copy> CopyCell<T> {
     /// Sets the contained value.
     #[inline]
     pub fn set(&self, value: T) {
-        let ptr = unsafe { &mut *self.mut_ptr() };
-        *ptr = value;
+        use std::ptr::write_volatile;
+
+        // Regular write produces abnormal behavior when running tests in
+        // `--release` mode. Reordering writes when the compiler assumes
+        // things are immutable is dangerous.
+        unsafe { write_volatile(self.mut_ptr(), value) };
     }
 }
 
