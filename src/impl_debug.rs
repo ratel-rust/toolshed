@@ -6,7 +6,7 @@ use set::{Set, BloomSet};
 
 impl<'arena, T> Debug for List<'arena, T>
 where
-    T: 'arena + Debug + Copy,
+    T: 'arena + Debug,
 {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

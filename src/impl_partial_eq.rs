@@ -5,7 +5,7 @@ use set::{Set, BloomSet};
 
 impl<'arena, T> PartialEq for List<'arena, T>
 where
-    T: 'arena + PartialEq + Copy,
+    T: 'arena + PartialEq,
 {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
