@@ -1,12 +1,11 @@
 use std::fmt::{self, Debug};
-use std::hash::Hash;
 use list::List;
 use map::{Map, BloomMap};
 use set::{Set, BloomSet};
 
 impl<'arena, T> Debug for List<'arena, T>
 where
-    T: 'arena + Debug,
+    T: Debug,
 {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -16,8 +15,8 @@ where
 
 impl<'arena, K, V> Debug for Map<'arena, K, V>
 where
-    K: 'arena + Debug + Eq + Hash + Copy,
-    V: 'arena + Debug + Copy,
+    K: Debug,
+    V: Debug + Copy,
 {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -27,8 +26,8 @@ where
 
 impl<'arena, K, V> Debug for BloomMap<'arena, K, V>
 where
-    K: 'arena + Debug + Eq + Hash + Copy + AsRef<[u8]>,
-    V: 'arena + Debug + Copy,
+    K: Debug,
+    V: Debug + Copy,
 {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -38,7 +37,7 @@ where
 
 impl<'arena, I> Debug for Set<'arena, I>
 where
-    I: 'arena + Debug + Eq + Hash + Copy,
+    I: Debug,
 {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -48,7 +47,7 @@ where
 
 impl<'arena, I> Debug for BloomSet<'arena, I>
 where
-    I: 'arena + Debug + Eq + Hash + Copy + AsRef<[u8]>,
+    I: Debug,
 {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

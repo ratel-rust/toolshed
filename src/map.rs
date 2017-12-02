@@ -1,7 +1,6 @@
 //! Maps of keys to values that can be used with the `Arena`.
 
 use std::hash::{Hash, Hasher};
-use std::fmt::{self, Debug};
 use fxhash::FxHasher;
 
 use cell::CopyCell;
@@ -21,25 +20,6 @@ where
     pub right: CopyCell<Option<&'arena MapNode<'arena, K, V>>>,
     pub next: CopyCell<Option<&'arena MapNode<'arena, K, V>>>,
 }
-
-impl<'arena, K: Debug, V: Debug + Copy> Debug for MapNode<'arena, K, V> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("MapNode")
-            .field(&self.key)
-            .field(&self.value.get())
-            .finish()
-    }
-}
-
-impl<'arena, K: Eq, V: Eq + Copy> PartialEq for MapNode<'arena, K, V> {
-    #[inline]
-    fn eq(&self, other: &MapNode<'arena, K, V>) -> bool {
-        self.hash  == other.hash &&
-        self.key   == other.key  &&
-        self.value == other.value
-    }
-}
-impl<'arena, K: Eq, V: Eq + Copy> Eq for MapNode<'arena, K, V> {}
 
 impl<'arena, K, V: Copy> MapNode<'arena, K, V> {
     #[inline]
@@ -61,15 +41,19 @@ impl<'arena, K, V: Copy> MapNode<'arena, K, V> {
 /// All the nodes of the map are also linked to allow iteration in
 /// insertion order.
 #[derive(Clone, Copy)]
-pub struct Map<'arena, K: 'arena, V: 'arena + Copy> {
+pub struct Map<'arena, K, V>
+where
+    K: 'arena,
+    V: 'arena + Copy,
+{
     root: CopyCell<Option<&'arena MapNode<'arena, K, V>>>,
     last: CopyCell<Option<&'arena MapNode<'arena, K, V>>>,
 }
 
 impl<'arena, K, V> Map<'arena, K, V>
 where
-    K: Eq + Hash + Copy,
-    V: Copy,
+    K: 'arena,
+    V: 'arena + Copy,
 {
     /// Create a new, empty `Map`.
     #[inline]
@@ -88,6 +72,24 @@ where
         }
     }
 
+    /// Returns true if the map contains no elements.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.root.get().is_none()
+    }
+
+    /// Clears the map.
+    #[inline]
+    pub fn clear(&self) {
+        self.root.set(None);
+    }
+}
+
+impl<'arena, K, V> Map<'arena, K, V>
+where
+    K: 'arena + Eq + Hash + Copy,
+    V: 'arena + Copy,
+{
     #[inline]
     fn hash_key(key: &K) -> u64 {
         let mut hasher = FxHasher::default();
@@ -159,18 +161,6 @@ where
 
         self.find_slot(key, hash).get().is_some()
     }
-
-    /// Returns true if the map contains no elements.
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.root.get().is_none()
-    }
-
-    /// Clears the map.
-    #[inline]
-    pub fn clear(&self) {
-        self.root.set(None);
-    }
 }
 
 /// A variant of the `Map` that includes a bloom filter using the
@@ -187,8 +177,8 @@ pub struct BloomMap<'arena, K: 'arena, V: 'arena + Copy> {
 
 impl<'arena, K, V> BloomMap<'arena, K, V>
 where
-    K: Eq + Hash + Copy + AsRef<[u8]>,
-    V: Copy,
+    K: 'arena,
+    V: 'arena + Copy,
 {
     /// Create a new, empty `BloomMap`.
     #[inline]
@@ -205,6 +195,26 @@ where
         self.inner.iter()
     }
 
+    /// Returns true if the map contains no elements.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Clears the map.
+    #[inline]
+    pub fn clear(&self) {
+        self.filter.set(0);
+        self.inner.clear();
+    }
+}
+
+
+impl<'arena, K, V> BloomMap<'arena, K, V>
+where
+    K: 'arena + Eq + Hash + Copy + AsRef<[u8]>,
+    V: 'arena + Copy,
+{
     /// Inserts a key-value pair into the map. If the key was previously set,
     /// old value is returned.
     #[inline]
@@ -231,19 +241,6 @@ where
         let b = bloom(key);
 
         self.filter.get() & b == b && self.inner.contains_key(key)
-    }
-
-    /// Returns true if the map contains no elements.
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
-
-    /// Clears the map.
-    #[inline]
-    pub fn clear(&self) {
-        self.filter.set(0);
-        self.inner.clear();
     }
 }
 
@@ -279,7 +276,7 @@ where
 
 impl<'arena, K, V> IntoIterator for Map<'arena, K, V>
 where
-    K: 'arena + Eq + Hash + Copy,
+    K: 'arena,
     V: 'arena + Copy,
 {
     type Item = (&'arena K, V);
@@ -293,7 +290,7 @@ where
 
 impl<'arena, K, V> IntoIterator for BloomMap<'arena, K, V>
 where
-    K: 'arena + Eq + Hash + Copy + AsRef<[u8]>,
+    K: 'arena,
     V: 'arena + Copy,
 {
     type Item = (&'arena K, V);

@@ -1,56 +1,57 @@
-use std::hash::Hash;
 use list::List;
 use map::{Map, BloomMap};
 use set::{Set, BloomSet};
 
-impl<'arena, T> PartialEq for List<'arena, T>
+impl<'a, 'b, A, B> PartialEq<List<'b, B>> for List<'a, A>
 where
-    T: 'arena + PartialEq,
+    A: PartialEq<B>,
 {
     #[inline]
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, other: &List<'b, B>) -> bool {
         self.iter().eq(other.iter())
     }
 }
 
-impl<'arena, K, V> PartialEq for Map<'arena, K, V>
+impl<'a, 'b, KA, VA, KB, VB> PartialEq<Map<'b, KB, VB>> for Map<'a, KA, VA>
 where
-    K: 'arena + Eq + Hash + Copy,
-    V: 'arena + PartialEq + Copy,
+    (&'a KA, VA): PartialEq<(&'b KB, VB)>,
+    VA: Copy,
+    VB: Copy,
 {
     #[inline]
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, other: &Map<'b, KB, VB>) -> bool {
         self.iter().eq(other.iter())
     }
 }
 
-impl<'arena, K, V> PartialEq for BloomMap<'arena, K, V>
+impl<'a, 'b, KA, VA, KB, VB> PartialEq<BloomMap<'b, KB, VB>> for BloomMap<'a, KA, VA>
 where
-    K: 'arena + Eq + Hash + Copy + AsRef<[u8]>,
-    V: 'arena + PartialEq + Copy,
+    (&'a KA, VA): PartialEq<(&'b KB, VB)>,
+    VA: Copy,
+    VB: Copy,
 {
     #[inline]
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, other: &BloomMap<'b, KB, VB>) -> bool {
         self.iter().eq(other.iter())
     }
 }
 
-impl<'arena, I> PartialEq for Set<'arena, I>
+impl<'a, 'b, A, B> PartialEq<Set<'b, B>> for Set<'a, A>
 where
-    I: 'arena + Eq + Hash + Copy,
+    A: PartialEq<B>,
 {
     #[inline]
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, other: &Set<'b, B>) -> bool {
         self.iter().eq(other.iter())
     }
 }
 
-impl<'arena, I> PartialEq for BloomSet<'arena, I>
+impl<'a, 'b, A, B> PartialEq<BloomSet<'b, B>> for BloomSet<'a, A>
 where
-    I: 'arena + Eq + Hash + Copy + AsRef<[u8]>,
+    A: PartialEq<B>,
 {
     #[inline]
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, other: &BloomSet<'b, B>) -> bool {
         self.iter().eq(other.iter())
     }
 }

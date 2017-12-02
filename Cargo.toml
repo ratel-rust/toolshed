@@ -1,6 +1,6 @@
 [package]
 name = "toolshed"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["maciejhirsz <maciej.hirsz@gmail.com>"]
 license = "MIT/Apache-2.0"
 description = "Arena allocator and a handful of useful data structures"
@@ -18,3 +18,6 @@ serde_json = "1.0"
 default = []
 
 impl_serialize = ["serde"]
+
+[profile.bench]
+lto = true

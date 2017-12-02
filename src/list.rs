@@ -9,6 +9,8 @@ pub struct List<'arena, T: 'arena> {
     root: CopyCell<Option<&'arena ListItem<'arena, T>>>,
 }
 
+impl<'arena, T: Copy> Copy for List<'arena, T> { }
+
 impl<'arena, T: 'arena> List<'arena, T> {
     /// Create a new empty `List`.
     #[inline]
@@ -143,7 +145,6 @@ impl<'arena, T: 'arena + Copy> List<'arena, T> {
     }
 }
 
-
 impl<'arena, T: 'arena> IntoIterator for List<'arena, T> {
     type Item = &'arena T;
     type IntoIter = ListIter<'arena, T>;
@@ -164,7 +165,6 @@ impl<'a, 'arena, T: 'arena> IntoIterator for &'a List<'arena, T> {
     }
 }
 
-impl<'arena, T: Copy> Copy for List<'arena, T> { }
 
 #[derive(Debug, PartialEq, Clone)]
 struct ListItem<'arena, T: 'arena> {

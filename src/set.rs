@@ -14,7 +14,7 @@ pub struct Set<'arena, I: 'arena> {
 
 impl<'arena, I> Set<'arena, I>
 where
-    I: Eq + Hash + Copy,
+    I: 'arena,
 {
     /// Creates a new, empty `Set`.
     #[inline]
@@ -32,18 +32,6 @@ where
         }
     }
 
-    /// Inserts a value into the set.
-    #[inline]
-    pub fn insert(&self, arena: &'arena Arena, item: I) {
-        self.map.insert(arena, item, ());
-    }
-
-    /// Returns `true` if the set contains a value.
-    #[inline]
-    pub fn contains(&self, item: I) -> bool {
-        self.map.contains_key(item)
-    }
-
     /// Returns `true` if the set contains no elements.
     #[inline]
     pub fn is_empty(&self) -> bool {
@@ -57,6 +45,23 @@ where
     }
 }
 
+impl<'arena, I> Set<'arena, I>
+where
+    I: 'arena + Eq + Hash + Copy,
+{
+    /// Inserts a value into the set.
+    #[inline]
+    pub fn insert(&self, arena: &'arena Arena, item: I) {
+        self.map.insert(arena, item, ());
+    }
+
+    /// Returns `true` if the set contains a value.
+    #[inline]
+    pub fn contains(&self, item: I) -> bool {
+        self.map.contains_key(item)
+    }
+}
+
 /// A set of values with a bloom filter. This structure is
 /// using a `BloomMap` with value type set to `()` internally.
 #[derive(Clone, Copy)]
@@ -66,7 +71,7 @@ pub struct BloomSet<'arena, I: 'arena> {
 
 impl<'arena, I> BloomSet<'arena, I>
 where
-    I: Eq + Hash + Copy + AsRef<[u8]>,
+    I: 'arena,
 {
     /// Creates a new, empty `BloomSet`.
     #[inline]
@@ -84,18 +89,6 @@ where
         }
     }
 
-    /// Inserts a value into the set.
-    #[inline]
-    pub fn insert(&self, arena: &'arena Arena, item: I) {
-        self.map.insert(arena, item, ());
-    }
-
-    /// Returns `true` if the set contains a value.
-    #[inline]
-    pub fn contains(&self, item: I) -> bool {
-        self.map.contains_key(item)
-    }
-
     /// Returns `true` if the set contains no elements.
     #[inline]
     pub fn is_empty(&self) -> bool {
@@ -106,6 +99,23 @@ where
     #[inline]
     pub fn clear(&self) {
         self.map.clear()
+    }
+}
+
+impl<'arena, I> BloomSet<'arena, I>
+where
+    I: 'arena + Eq + Hash + Copy + AsRef<[u8]>,
+{
+    /// Inserts a value into the set.
+    #[inline]
+    pub fn insert(&self, arena: &'arena Arena, item: I) {
+        self.map.insert(arena, item, ());
+    }
+
+    /// Returns `true` if the set contains a value.
+    #[inline]
+    pub fn contains(&self, item: I) -> bool {
+        self.map.contains_key(item)
     }
 }
 
@@ -125,7 +135,7 @@ impl<'arena, I: 'arena> Iterator for SetIter<'arena, I> {
 
 impl<'arena, I> IntoIterator for Set<'arena, I>
 where
-    I: 'arena + Eq + Hash + Copy,
+    I: 'arena,
 {
     type Item = &'arena I;
     type IntoIter = SetIter<'arena, I>;
@@ -138,7 +148,7 @@ where
 
 impl<'arena, I> IntoIterator for BloomSet<'arena, I>
 where
-    I: 'arena + Eq + Hash + Copy + AsRef<[u8]>,
+    I: 'arena,
 {
     type Item = &'arena I;
     type IntoIter = SetIter<'arena, I>;

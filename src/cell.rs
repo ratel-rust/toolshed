@@ -6,23 +6,21 @@ use std::marker::PhantomData;
 /// This should be identical to the `Cell` implementation in the standard
 /// library, but always require that the internal type implements `Copy`
 /// and implements `Copy` itself.
-#[derive(PartialEq)]
-pub struct CopyCell<T: Copy> {
+#[derive(PartialEq, Eq)]
+pub struct CopyCell<T> {
     /// Internal value
-    pub(crate) value: T,
+    value: T,
 
     /// We trick the compiler to think that `CopyCell` contains a raw pointer,
     /// this way we make sure the `Sync` marker is not implemented and `CopyCell`
     /// cannot be shared across threads!
-    pub(crate) _no_sync: PhantomData<*mut T>
+    _no_sync: PhantomData<*mut T>
 }
 
 /// `Sync` is unsafe due to mutability, however `Send` is totally fine!
-unsafe impl<T: Copy> Send for CopyCell<T> {}
+unsafe impl<T> Send for CopyCell<T> {}
 
-impl<T: Copy + Eq> Eq for CopyCell<T> {}
-
-impl<T: Copy> CopyCell<T> {
+impl<T> CopyCell<T> {
     /// Creates a new `CopyCell` containing the given value.
     #[inline]
     pub fn new(value: T) -> Self {
@@ -31,7 +29,9 @@ impl<T: Copy> CopyCell<T> {
             _no_sync: PhantomData
         }
     }
+}
 
+impl<T: Copy> CopyCell<T> {
     #[inline]
     fn mut_ptr(&self) -> *mut T {
         &self.value as *const T as *mut T
@@ -118,5 +118,14 @@ mod test {
         assert_eq!(cell_a.get(), 200);
         assert_eq!(cell_b.get(), 300);
         assert_eq!(cell_c.get(), 200);
+    }
+
+    #[test]
+    fn contain_static_ref() {
+        static REF: &(&u64, u64) = &(&0, 0);
+
+        let cell = CopyCell::new(REF);
+
+        assert_eq!(cell.get(), REF);
     }
 }
