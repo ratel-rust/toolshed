@@ -419,22 +419,22 @@ mod test {
         assert_eq!(iter.next(), None);
     }
 
-    // #[test]
-    // fn from_eq() {
-    //     let arena = Arena::new();
-    //     let map = Map::new();
+    #[test]
+    fn from_eq() {
+        let arena = Arena::new();
+        let map = Map::new();
 
-    //     map.insert(&arena, "foo", 10);
-    //     map.insert(&arena, "bar", 20);
-    //     map.insert(&arena, "doge", 30);
+        map.insert(&arena, "foo", 10);
+        map.insert(&arena, "bar", 20);
+        map.insert(&arena, "doge", 30);
 
-    //     let bloom_map = BloomMap::new();
+        let bloom_map = BloomMap::new();
 
-    //     bloom_map.insert(&arena, "foo", 10);
-    //     bloom_map.insert(&arena, "bar", 20);
-    //     bloom_map.insert(&arena, "doge", 30);
+        bloom_map.insert(&arena, "foo", 10);
+        bloom_map.insert(&arena, "bar", 20);
+        bloom_map.insert(&arena, "doge", 30);
 
-    //     assert_eq!(map, Map::from(bloom_map));
-    //     assert_eq!(BloomMap::from(map), bloom_map);
-    // }
+        assert_eq!(map, Map::from(bloom_map));
+        assert_eq!(BloomMap::from(map), bloom_map);
+    }
 }

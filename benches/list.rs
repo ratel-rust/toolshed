@@ -79,70 +79,66 @@ fn vec_create_256(b: &mut Bencher) {
 #[bench]
 fn list_create_016(b: &mut Bencher) {
     let arena = Arena::new();
-    let a     = &arena;
     let words = &WORDS[1..16];
 
     b.iter(|| {
-        unsafe { a.clear() };
-        let mut builder = ListBuilder::new(a, WORDS[0]);
+        unsafe { arena.clear() };
+        let builder = ListBuilder::new(&arena, WORDS[0]);
 
         for word in words.iter() {
-            builder.push(*word);
+            builder.push(&arena, *word);
         }
 
-        black_box(builder.into_list());
+        black_box(builder.as_list());
     })
 }
 
 #[bench]
 fn list_create_032(b: &mut Bencher) {
     let arena = Arena::new();
-    let a     = &arena;
     let words = &WORDS[1..32];
 
     b.iter(|| {
-        unsafe { a.clear() };
-        let mut builder = ListBuilder::new(a, WORDS[0]);
+        unsafe { arena.clear() };
+        let builder = ListBuilder::new(&arena, WORDS[0]);
 
         for word in words.iter() {
-            builder.push(*word);
+            builder.push(&arena, *word);
         }
 
-        black_box(builder.into_list());
+        black_box(builder.as_list());
     })
 }
 
 #[bench]
 fn list_create_064(b: &mut Bencher) {
     let arena = Arena::new();
-    let a     = &arena;
     let words = &WORDS[1..64];
 
     b.iter(|| {
-        unsafe { a.clear() };
-        let mut builder = ListBuilder::new(a, WORDS[0]);
+        unsafe { arena.clear() };
+        let builder = ListBuilder::new(&arena, WORDS[0]);
 
         for word in words.iter() {
-            builder.push(*word);
+            builder.push(&arena, *word);
         }
 
-        black_box(builder.into_list());
+        black_box(builder.as_list());
     })
 }
 
 #[bench]
 fn list_create_256(b: &mut Bencher) {
     let arena = Arena::new();
-    let a     = &arena;
 
     b.iter(|| {
-        unsafe { a.clear() };
-        let mut builder = ListBuilder::new(a, (0usize, 0));
+        unsafe { arena.clear() };
+        let builder = ListBuilder::new(&arena, (0usize, 0));
 
         for i in 1..256usize {
-            builder.push((i, i));
+            builder.push(&arena, (i, i));
         }
 
-        black_box(builder.into_list());
+        black_box(builder.as_list());
     })
 }

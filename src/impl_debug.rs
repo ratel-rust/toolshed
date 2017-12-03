@@ -1,5 +1,5 @@
 use std::fmt::{self, Debug};
-use list::List;
+use list::{List, GrowableList, ListBuilder};
 use map::{Map, BloomMap};
 use set::{Set, BloomSet};
 
@@ -10,6 +10,26 @@ where
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl<'arena, T> Debug for GrowableList<'arena, T>
+where
+    T: Debug,
+{
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.as_list().fmt(f)
+    }
+}
+
+impl<'arena, T> Debug for ListBuilder<'arena, T>
+where
+    T: Debug,
+{
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.as_list().fmt(f)
     }
 }
 

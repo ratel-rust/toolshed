@@ -3,10 +3,18 @@
 use Arena;
 use cell::CopyCell;
 
+#[derive(Debug, PartialEq, Clone)]
+struct ListNode<'arena, T: 'arena> {
+    value: T,
+    next: CopyCell<Option<&'arena ListNode<'arena, T>>>,
+}
+
+impl<'arena, T: Copy> Copy for ListNode<'arena, T> {}
+
 /// A single-ended linked list.
 #[derive(Clone)]
 pub struct List<'arena, T: 'arena> {
-    root: CopyCell<Option<&'arena ListItem<'arena, T>>>,
+    root: CopyCell<Option<&'arena ListNode<'arena, T>>>,
 }
 
 impl<'arena, T: Copy> Copy for List<'arena, T> { }
@@ -48,7 +56,7 @@ impl<'arena, T: 'arena> List<'arena, T> {
     #[inline]
     pub fn only_element(&self) -> Option<&'arena T> {
         match self.root.get() {
-            Some(&ListItem {
+            Some(&ListNode {
                 ref value,
                 ref next,
                 ..
@@ -57,13 +65,19 @@ impl<'arena, T: 'arena> List<'arena, T> {
         }
     }
 
+    /// Returns the reference to the first element.
+    #[inline]
+    pub fn first_element(&self) -> Option<&'arena T> {
+        self.root.get().map(|li| &li.value)
+    }
+
     /// Returns an `UnsafeList` for the current `List`. While this function is
     /// safe itself, using `UnsafeList` might lead to undefined behavior.
     #[inline]
     pub fn into_unsafe(self) -> UnsafeList {
         UnsafeList {
             root: match self.root.get() {
-                Some(ptr) => ptr as *const ListItem<'arena, T> as usize,
+                Some(ptr) => ptr as *const ListNode<'arena, T> as usize,
                 None      => 0
             }
         }
@@ -75,7 +89,7 @@ impl<'arena, T: 'arena + Copy> List<'arena, T> {
     #[inline]
     pub fn from(arena: &'arena Arena, value: T) -> List<'arena, T> {
         List {
-            root: CopyCell::new(Some(arena.alloc(ListItem {
+            root: CopyCell::new(Some(arena.alloc(ListNode {
                 value,
                 next: CopyCell::new(None)
             })))
@@ -88,32 +102,36 @@ impl<'arena, T: 'arena + Copy> List<'arena, T> {
     {
         let mut iter = source.into_iter();
 
-        let mut builder = match iter.next() {
+        let builder = match iter.next() {
             Some(item) => ListBuilder::new(arena, item),
             None       => return List::empty(),
         };
 
         for item in iter {
-            builder.push(item);
+            builder.push(arena, item);
         }
 
-        builder.into_list()
+        builder.as_list()
     }
 
     /// Adds a new element to the beginning of the list.
     #[inline]
-    pub fn prepend(&self, arena: &'arena Arena, value: T) {
-        self.root.set(Some(arena.alloc(
-            ListItem {
+    pub fn prepend(&self, arena: &'arena Arena, value: T) -> &'arena T {
+        let root = arena.alloc(
+            ListNode {
                 value,
                 next: self.root
             }
-        )));
+        );
+
+        self.root.set(Some(root));
+
+        &root.value
     }
 
     /// Removes the first element from the list and returns it.
     #[inline]
-    pub fn shift(&self) -> Option<T> {
+    pub fn shift(&self) -> Option<&'arena T> {
         let list_item = match self.root.get() {
             None => return None,
             Some(list_item) => list_item
@@ -121,7 +139,7 @@ impl<'arena, T: 'arena + Copy> List<'arena, T> {
 
         self.root.set(list_item.next.get());
 
-        Some(list_item.value)
+        Some(&list_item.value)
     }
 
     /// Get the first element of the `List`, if any, then create a
@@ -131,7 +149,7 @@ impl<'arena, T: 'arena + Copy> List<'arena, T> {
     /// Note: This does not modify the internal state of the `List`.
     ///       If you wish to modify the list use `shift` instead.
     #[inline]
-    pub fn shift_ref(&mut self) -> Option<T> {
+    pub fn shift_ref(&mut self) -> Option<&'arena T> {
         let list_item = match self.root.get() {
             None => return None,
             Some(list_item) => list_item
@@ -141,7 +159,7 @@ impl<'arena, T: 'arena + Copy> List<'arena, T> {
             root: list_item.next
         };
 
-        Some(list_item.value)
+        Some(&list_item.value)
     }
 }
 
@@ -165,108 +183,114 @@ impl<'a, 'arena, T: 'arena> IntoIterator for &'a List<'arena, T> {
     }
 }
 
-
-#[derive(Debug, PartialEq, Clone)]
-struct ListItem<'arena, T: 'arena> {
-    value: T,
-    next: CopyCell<Option<&'arena ListItem<'arena, T>>>,
+/// A variant of the `List` that keeps track of the last element and thus
+/// allows user to push to the end of the list.
+#[derive(Clone, Copy)]
+pub struct GrowableList<'arena, T>
+where
+    T: 'arena,
+{
+    first: CopyCell<Option<&'arena ListNode<'arena, T>>>,
+    last: CopyCell<Option<&'arena ListNode<'arena, T>>>,
 }
 
-impl<'arena, T: Copy> Copy for ListItem<'arena, T> {}
+impl<'arena, T> GrowableList<'arena, T>
+where
+    T: 'arena + Copy,
+{
+    /// Push a new item at the end of the `List`.
+    #[inline]
+    pub fn push(&self, arena: &'arena Arena, item: T) {
+        let next = Some(arena.alloc(ListNode {
+            value: item,
+            next: CopyCell::new(None)
+        }));
 
-/// A builder struct that allows to push elements onto the end of the list.
-pub struct ListBuilder<'arena, T: 'arena + Copy> {
-    arena: &'arena Arena,
-    first: &'arena ListItem<'arena, T>,
-    last: &'arena ListItem<'arena, T>,
+        match self.last.get() {
+            Some(ref last) => last.next.set(next),
+            None           => self.first.set(next),
+        }
+
+        self.last.set(next);
+    }
 }
 
-impl<'arena, T: 'arena + Copy> ListBuilder<'arena, T> {
+impl<'arena, T> GrowableList<'arena, T>
+where
+    T: 'arena,
+{
+    /// Create a new builder.
+    #[inline]
+    pub fn new() -> Self {
+        GrowableList {
+            first: CopyCell::new(None),
+            last: CopyCell::new(None),
+        }
+    }
+
+    /// Get a `List` from the builder.
+    #[inline]
+    pub fn as_list(&self) -> List<'arena, T> {
+        List {
+            root: self.first
+        }
+    }
+}
+
+/// A builder that allows one to push elements onto the end of the list.
+///
+/// This is in principle identical to `GrowableList`, however it skips
+/// some checks on pushing given that it always has to have at least one
+/// element, and thus might be ever so slightly faster.
+#[derive(Clone, Copy)]
+pub struct ListBuilder<'arena, T: 'arena>
+where
+    T: 'arena,
+{
+    first: CopyCell<&'arena ListNode<'arena, T>>,
+    last: CopyCell<&'arena ListNode<'arena, T>>,
+}
+
+impl<'arena, T> ListBuilder<'arena, T>
+where
+    T: 'arena + Copy,
+{
     /// Create a new builder with the first element.
     #[inline]
     pub fn new(arena: &'arena Arena, first: T) -> Self {
-        let first = arena.alloc(ListItem {
+        let first = CopyCell::new(arena.alloc(ListNode {
             value: first,
             next: CopyCell::new(None)
-        });
+        }));
 
         ListBuilder {
-            arena,
             first,
-            last: first
+            last: first,
         }
     }
 
     /// Push a new item at the end of the `List`.
     #[inline]
-    pub fn push(&mut self, item: T) {
-        let next = self.arena.alloc(ListItem {
+    pub fn push(&self, arena: &'arena Arena, item: T) {
+        let next = arena.alloc(ListNode {
             value: item,
             next: CopyCell::new(None)
         });
 
-        self.last.next.set(Some(next));
-        self.last = next;
-    }
-
-    /// Consume the builder and return a `List`.
-    #[inline]
-    pub fn into_list(self) -> List<'arena, T> {
-        List {
-            root: CopyCell::new(Some(self.first))
-        }
+        self.last.get().next.set(Some(next));
+        self.last.set(next);
     }
 }
 
-/// A builder struct that allows to push elements onto the end of the list.
-///
-/// This is essentially identical to `ListBuilder` in purpose, but ever so
-/// slightly slower since an extra check has to be performed on each `push`.
-pub struct EmptyListBuilder<'arena, T: 'arena + Copy> {
-    arena: &'arena Arena,
-    first: Option<&'arena ListItem<'arena, T>>,
-    last: Option<&'arena ListItem<'arena, T>>,
-}
-
-impl<'arena, T: 'arena + Copy> EmptyListBuilder<'arena, T> {
-    /// Create a new builder.
+impl<'arena, T> ListBuilder<'arena, T>
+where
+    T: 'arena,
+{
+    /// Get a `List` from the builder.
     #[inline]
-    pub fn new(arena: &'arena Arena) -> Self {
-        EmptyListBuilder {
-            arena,
-            first: None,
-            last: None,
-        }
-    }
-
-    /// Push a new item at the end of the `List`.
-    #[inline]
-    pub fn push(&mut self, item: T) {
-        match self.last {
-            None => {
-                self.first = Some(self.arena.alloc(ListItem {
-                    value: item,
-                    next: CopyCell::new(None)
-                }));
-                self.last = self.first;
-            },
-            Some(ref mut last) => {
-                let next = self.arena.alloc(ListItem {
-                    value: item,
-                    next: CopyCell::new(None)
-                });
-
-                last.next.set(Some(next));
-                *last = next;
-            }
-        }
-    }
-
-    /// Consume the builder and return a `List`.
-    #[inline]
-    pub fn into_list(self) -> List<'arena, T> {
+    pub fn as_list(&self) -> List<'arena, T> {
         List {
-            root: CopyCell::new(self.first)
+            root: CopyCell::new(Some(self.first.get()))
         }
     }
 }
@@ -285,7 +309,7 @@ impl UnsafeList {
         List {
             root: CopyCell::new(match self.root {
                 0   => None,
-                ptr => Some(&*(ptr as *const ListItem<'arena, T>))
+                ptr => Some(&*(ptr as *const ListNode<'arena, T>))
             })
         }
     }
@@ -293,7 +317,7 @@ impl UnsafeList {
 
 /// An iterator over the items in the list.
 pub struct ListIter<'arena, T: 'arena> {
-    next: Option<&'arena ListItem<'arena, T>>
+    next: Option<&'arena ListNode<'arena, T>>
 }
 
 impl<'arena, T: 'arena> Iterator for ListIter<'arena, T> {
@@ -318,12 +342,12 @@ mod test {
     #[test]
     fn builder() {
         let arena = Arena::new();
-        let mut builder = ListBuilder::new(&arena, 10);
+        let builder = ListBuilder::new(&arena, 10);
 
-        builder.push(20);
-        builder.push(30);
+        builder.push(&arena, 20);
+        builder.push(&arena, 30);
 
-        let list = builder.into_list();
+        let list = builder.as_list();
 
         assert!(list.iter().eq([10, 20, 30].iter()));
     }
@@ -331,13 +355,13 @@ mod test {
     #[test]
     fn empty_builder() {
         let arena = Arena::new();
-        let mut builder = EmptyListBuilder::new(&arena);
+        let builder = GrowableList::new();
 
-        builder.push(10);
-        builder.push(20);
-        builder.push(30);
+        builder.push(&arena, 10);
+        builder.push(&arena, 20);
+        builder.push(&arena, 30);
 
-        let list = builder.into_list();
+        let list = builder.as_list();
 
         assert!(list.iter().eq([10, 20, 30].iter()));
     }
@@ -376,15 +400,15 @@ mod test {
     #[test]
     fn shift() {
         let arena = Arena::new();
-        let mut builder = EmptyListBuilder::new(&arena);
+        let builder = GrowableList::new();
 
-        builder.push(10);
-        builder.push(20);
-        builder.push(30);
+        builder.push(&arena, 10);
+        builder.push(&arena, 20);
+        builder.push(&arena, 30);
 
-        let list = builder.into_list();
+        let list = builder.as_list();
 
-        assert_eq!(list.shift(), Some(10));
+        assert_eq!(list.shift(), Some(&10));
 
         assert!(list.iter().eq([20, 30].iter()));
     }
@@ -392,16 +416,16 @@ mod test {
     #[test]
     fn shift_ref() {
         let arena = Arena::new();
-        let mut builder = EmptyListBuilder::new(&arena);
+        let builder = GrowableList::new();
 
-        builder.push(10);
-        builder.push(20);
-        builder.push(30);
+        builder.push(&arena, 10);
+        builder.push(&arena, 20);
+        builder.push(&arena, 30);
 
-        let list_a = builder.into_list();
+        let list_a = builder.as_list();
         let mut list_b = list_a;
 
-        assert_eq!(list_b.shift_ref(), Some(10));
+        assert_eq!(list_b.shift_ref(), Some(&10));
 
         assert!(list_a.iter().eq([10, 20, 30].iter()));
         assert!(list_b.iter().eq([20, 30].iter()));

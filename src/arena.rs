@@ -75,10 +75,11 @@ impl Arena {
         }
     }
 
-    /// Allocate an `&str` slice onto the arena with an extra null byte at the end.
-    /// Can be useful for C-style byte parsers where a null byte is not expected in
-    /// a well formatted string.
-    pub fn alloc_str_zero_end<'a>(&'a self, val: &str) -> *const u8 {
+    /// Allocate an `&str` slice onto the arena as null terminated C-style string.
+    /// No checks are performed on the source and whether or not it already contains
+    /// any nul bytes. While this does not create any memory issues, it assumes that
+    /// the reader of the source can deal with malformed source.
+    pub fn alloc_str_with_nul<'a>(&'a self, val: &str) -> *const u8 {
         let len_with_zero = val.len() + 1;
         let ptr = self.require(len_with_zero);
 
@@ -159,9 +160,22 @@ impl Arena {
     /// The only case where the use of this method would be justified is
     /// in benchmarks where creation of a structure on the arena is to be
     /// tested without the cost of re-creating the arena itself on every iteration.
+    #[doc(hidden)]
     #[inline]
     pub unsafe fn clear(&self) {
-        self.offset.set(0)
+        self.reset_to(0)
+    }
+
+    #[doc(hidden)]
+    #[inline]
+    pub unsafe fn offset(&self) -> usize {
+        self.offset.get()
+    }
+
+    #[doc(hidden)]
+    #[inline]
+    pub unsafe fn reset_to(&self, offset: usize) {
+        self.offset.set(offset)
     }
 }
 
@@ -224,9 +238,9 @@ mod test {
     }
 
     #[test]
-    fn alloc_str_zero_end() {
+    fn alloc_str_with_nul() {
         let arena = Arena::new();
-        let ptr = arena.alloc_str_zero_end("abcdefghijk");
+        let ptr = arena.alloc_str_with_nul("abcdefghijk");
         let allocated = unsafe { ::std::slice::from_raw_parts(ptr, 12) };
 
         assert_eq!(arena.offset.get(), 16);
