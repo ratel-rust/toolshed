@@ -1,6 +1,6 @@
 [package]
 name = "toolshed"
-version = "0.4.0"
+version = "0.4.1"
 authors = ["maciejhirsz <maciej.hirsz@gmail.com>"]
 license = "MIT/Apache-2.0"
 description = "Arena allocator and a handful of useful data structures"

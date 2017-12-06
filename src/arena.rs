@@ -16,8 +16,57 @@ pub struct Arena {
     offset: Cell<usize>
 }
 
+/// A pointer to an uninitialized region of memory.
+pub struct Uninitialized<'arena, T: 'arena> {
+    pointer: &'arena mut T,
+}
+
+impl<'arena, T: 'arena> Uninitialized<'arena, T> {
+    /// Initialize the memory at the pointer with a given value.
+    #[inline]
+    pub fn init(self, value: T) -> &'arena T {
+        *self.pointer = value;
+
+        &*self.pointer
+    }
+
+    /// Get a reference to the pointer without writing to it.
+    ///
+    /// **Reading from this reference without calling `init` is undefined behavior.**
+    #[inline]
+    pub unsafe fn as_ref(&self) -> &'arena T {
+        &*(self.pointer as *const T)
+    }
+
+    /// Convert the `Uninitialized` to a regular mutable reference.
+    ///
+    /// **Reading from this reference without calling `init` is undefined behavior.**
+    #[inline]
+    pub unsafe fn into_mut(self) -> &'arena mut T {
+        self.pointer
+    }
+
+    /// Convert a raw pointer to an `Uninitialized`. This method is unsafe since it can
+    /// bind to arbitrary lifetimes.
+    #[inline]
+    pub unsafe fn from_raw(pointer: *mut T) -> Self {
+        Uninitialized {
+            pointer: &mut *pointer,
+        }
+    }
+}
+
+impl<'arena, T: 'arena> From<&'arena mut T> for Uninitialized<'arena, T> {
+    #[inline]
+    fn from(pointer: &'arena mut T) -> Self {
+        Uninitialized {
+            pointer
+        }
+    }
+}
+
 impl Arena {
-    /// Create a new arena with a single preallocated 64KiB page
+    /// Create a new arena with a single preallocated 64KiB page.
     pub fn new() -> Self {
         let mut store = vec![Vec::with_capacity(ARENA_BLOCK)];
         let ptr = store[0].as_mut_ptr();
@@ -31,20 +80,33 @@ impl Arena {
 
     /// Put the value onto the page of the arena and return a reference to it.
     #[inline]
-    pub fn alloc<'a, T: Sized + Copy>(&'a self, val: T) -> &'a T {
-        unsafe {
-            let ptr = self.alloc_uninitialized();
-            *ptr = val;
-            &*ptr
+    pub fn alloc<'arena, T: Sized + Copy>(&'arena self, value: T) -> &'arena T {
+        self.alloc_uninitialized().init(value)
+    }
+
+    /// Allocate enough bytes for the type `T`, then return an `Uninitialized` pointer to the memory.
+    #[inline]
+    pub fn alloc_uninitialized<'arena, T: Sized + Copy>(&'arena self) -> Uninitialized<'arena, T> {
+        Uninitialized {
+            pointer: unsafe { &mut *(self.require(size_of::<T>()) as *mut T) }
         }
     }
 
-    /// Allocate enough bytes for the type `T`, then return a pointer to the memory.
-    /// Memory behind the pointer is uninitialized, can contain garbage and reading
-    /// from it is undefined behavior.
-    #[inline]
-    pub unsafe fn alloc_uninitialized<'a, T: Sized + Copy>(&'a self) -> &'a mut T {
-        &mut *(self.require(size_of::<T>()) as *mut T)
+    /// Allocate a slice of `T` slice onto the arena and return a reference to it.
+    /// This is useful when the original slice has an undefined lifetime.
+    ///
+    /// Note: static slices (`&'static [T]`) can be safely used in place of arena-bound
+    ///       slices without having to go through this method.
+    pub fn alloc_slice<'arena, T: Copy>(&'arena self, val: &[T]) -> &'arena [T] {
+        let ptr = self.require(val.len() * size_of::<T>()) as *mut T;
+
+        unsafe {
+            use std::ptr::copy_nonoverlapping;
+            use std::slice::from_raw_parts;
+
+            copy_nonoverlapping(val.as_ptr(), ptr, val.len());
+            from_raw_parts(ptr, val.len())
+        }
     }
 
     /// Allocate an `&str` slice onto the arena and return a reference to it. This is
@@ -52,26 +114,11 @@ impl Arena {
     ///
     /// Note: static slices (`&'static str`) can be safely used in place of arena-bound
     ///       slices without having to go through this method.
-    pub fn alloc_str<'a>(&'a self, val: &str) -> &'a str {
-        let offset = self.offset.get();
-        let alignment = size_of::<usize>() - (val.len() % size_of::<usize>());
-        let cap = offset + val.len() + alignment;
-
-        if cap > ARENA_BLOCK {
-            return self.alloc_string(val.into());
-        }
-
-        self.offset.set(cap);
-
+    pub fn alloc_str<'arena>(&'arena self, val: &str) -> &'arena str {
         unsafe {
-            use std::ptr::copy_nonoverlapping;
             use std::str::from_utf8_unchecked;
-            use std::slice::from_raw_parts;
 
-            let ptr = self.ptr.get().offset(offset as isize);
-            copy_nonoverlapping(val.as_ptr(), ptr, val.len());
-
-            from_utf8_unchecked(from_raw_parts(ptr, val.len()))
+            from_utf8_unchecked(self.alloc_slice(val.as_bytes()))
         }
     }
 
@@ -79,7 +126,7 @@ impl Arena {
     /// No checks are performed on the source and whether or not it already contains
     /// any nul bytes. While this does not create any memory issues, it assumes that
     /// the reader of the source can deal with malformed source.
-    pub fn alloc_str_with_nul<'a>(&'a self, val: &str) -> *const u8 {
+    pub fn alloc_str_with_nul<'arena>(&'arena self, val: &str) -> *const u8 {
         let len_with_zero = val.len() + 1;
         let ptr = self.require(len_with_zero);
 
@@ -94,7 +141,7 @@ impl Arena {
 
     /// Pushes the `String` as it's own page onto the arena and returns a reference to it.
     /// This does not copy or reallocate the original `String`.
-    pub fn alloc_string<'a>(&'a self, val: String) -> &'a str {
+    pub fn alloc_string<'arena>(&'arena self, val: String) -> &'arena str {
         let len = val.len();
         let ptr = self.alloc_vec(val.into_bytes());
 
@@ -128,10 +175,9 @@ impl Arena {
             return self.alloc_bytes(size);
         }
 
-        // This should also be optimized away.
         let size = match size % size_of::<usize>() {
             0 => size,
-            n => size + n
+            n => size + (size_of::<usize>() - n),
         };
 
         let offset = self.offset.get();
@@ -209,7 +255,7 @@ mod test {
         assert_eq!(arena.alloc(0u64), &0);
         assert_eq!(arena.alloc(42u64), &42);
 
-        unsafe { arena.alloc_uninitialized::<[usize; 1024 * 1024]>() };
+        arena.alloc_uninitialized::<[usize; 1024 * 1024]>();
 
         // Still writes to the first page
         assert_eq!(arena.offset.get(), 8 * 2);
@@ -224,6 +270,25 @@ mod test {
 
         // Second page is appropriately large
         assert_eq!(arena.store.get_mut()[1].capacity(), size_of::<usize>() * 1024 * 1024);
+    }
+
+    #[test]
+    fn alloc_slice() {
+        let arena = Arena::new();
+
+        assert_eq!(arena.alloc_slice(&[10u16, 20u16]), &[10u16, 20u16][..]);
+        assert_eq!(arena.offset.get(), 8);
+    }
+
+    #[test]
+    fn aligns_slice_allocs() {
+        let arena = Arena::new();
+
+        assert_eq!(arena.alloc_slice(b"foo"), b"foo");
+        assert_eq!(arena.offset.get(), 8);
+
+        assert_eq!(arena.alloc_slice(b"doge to the moon!"), b"doge to the moon!");
+        assert_eq!(arena.offset.get(), 32);
     }
 
     #[test]
