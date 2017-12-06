@@ -25,7 +25,7 @@ impl Arena {
         Arena {
             store: Cell::new(store),
             ptr: Cell::new(ptr),
-            offset: Cell::new(0)
+            offset: Cell::new(0),
         }
     }
 
@@ -171,7 +171,7 @@ impl Arena {
         // This should also be optimized away.
         let size = match size % size_of::<usize>() {
             0 => size,
-            n => size + n
+            n => size + n,
         };
 
         let offset = self.offset.get();
@@ -274,7 +274,10 @@ mod test {
         assert_eq!(arena.store.get_mut().len(), 2);
 
         // Second page is appropriately large
-        assert_eq!(arena.store.get_mut()[1].capacity(), size_of::<usize>() * 1024 * 1024);
+        assert_eq!(
+            arena.store.get_mut()[1].capacity(),
+            size_of::<usize>() * 1024 * 1024
+        );
     }
 
     #[test]
@@ -295,6 +298,11 @@ mod test {
         let allocated = unsafe { ::std::slice::from_raw_parts(ptr, 12) };
 
         assert_eq!(arena.offset.get(), 16);
-        assert_eq!(allocated, &[b'a', b'b', b'c', b'd', b'e', b'f', b'g', b'h', b'i', b'j', b'k', 0]);
+        assert_eq!(
+            allocated,
+            &[
+                b'a', b'b', b'c', b'd', b'e', b'f', b'g', b'h', b'i', b'j', b'k', 0
+            ]
+        );
     }
 }
