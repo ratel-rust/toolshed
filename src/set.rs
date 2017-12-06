@@ -12,6 +12,15 @@ pub struct Set<'arena, I: 'arena> {
     map: Map<'arena, I, ()>,
 }
 
+impl<'arena, I> Default for Set<'arena, I>
+where
+    I: 'arena,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'arena, I> Set<'arena, I>
 where
     I: 'arena,
