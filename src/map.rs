@@ -148,6 +148,14 @@ where
 
     /// Returns the value corresponding to the key.
     #[inline]
+    pub fn get_key(&self, key: K) -> Option<&K> {
+        let hash = Self::hash_key(&key);
+
+        self.find_slot(key, hash).get().map(|node| &node.key)
+    }
+
+    /// Returns the value corresponding to the key.
+    #[inline]
     pub fn get(&self, key: K) -> Option<V> {
         let hash = Self::hash_key(&key);
 

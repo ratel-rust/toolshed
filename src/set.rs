@@ -55,6 +55,12 @@ where
         self.map.insert(arena, item, ());
     }
 
+    /// Gets a reference to the existing value in the set, if it exists
+    #[inline]
+    pub fn get(&self, key: I) -> Option<&I> {
+        self.map.get_key(key)
+    }
+
     /// Returns `true` if the set contains a value.
     #[inline]
     pub fn contains(&self, item: I) -> bool {
