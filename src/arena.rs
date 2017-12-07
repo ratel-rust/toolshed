@@ -1,5 +1,6 @@
 use std::mem::size_of;
 use std::cell::Cell;
+use std::borrow::Cow;
 
 const ARENA_BLOCK: usize = 64 * 1024;
 
@@ -31,41 +32,45 @@ impl Arena {
 
     /// Allocate many items at once, without reallocating
     #[inline]
-    pub fn alloc_many<'a, T: Sized + Copy>(&'a self, mut vals: Vec<T>) -> &'a [T] {
-        use std::{mem, slice, ptr};
+    pub fn alloc_many<'input, 'output, T: Sized + Copy + 'input, V: Into<Cow<'input, [T]>>>(
+        &'output self,
+        vals: V,
+    ) -> &'output [T] {
+        use std::{mem, ptr, slice};
 
-        if vals.is_empty() {
+        let vals = vals.into();
+
+        if vals.as_ref().is_empty() {
             return &[];
         }
 
-        let len = vals.len();
+        let len = vals.as_ref().len();
         let bytes = len * mem::size_of::<T>();
 
-        let store = self.store
-            .replace(Default::default());
+        match vals {
+            Cow::Owned(mut vec) => {
+                let p = vec.as_mut_ptr();
+                let cap = vec.capacity();
 
-        let should_copy = store.last()
-            .map(|last| bytes <= last.capacity() - last.len())
-            .unwrap_or(false);
+                mem::forget(vec);
 
-        self.store.replace(store);
+                let out = self.alloc_vec(unsafe {
+                    Vec::from_raw_parts(
+                        p as _,
+                        len * mem::size_of::<T>(),
+                        cap * mem::size_of::<T>(),
+                    )
+                });
 
-        if should_copy {
-            let ptr = self.require(bytes);
-            unsafe { ptr::copy_nonoverlapping(vals.as_ptr() as _, ptr, bytes) };
+                unsafe { slice::from_raw_parts(out as _, len) }
+            }
+            Cow::Borrowed(slice) => {
+                let ptr = self.require(bytes);
 
-            unsafe { slice::from_raw_parts(ptr as _, len) }
-        } else {
-            let p = vals.as_mut_ptr();
-            let cap = vals.capacity();
+                unsafe { ptr::copy_nonoverlapping(slice.as_ptr() as _, ptr, bytes) };
 
-            mem::forget(vals);
-
-            let out = self.alloc_vec(unsafe {
-                Vec::from_raw_parts(p as _, len * mem::size_of::<T>(), cap * mem::size_of::<T>())
-            });
-
-            unsafe { slice::from_raw_parts(out as _, len) }
+                unsafe { slice::from_raw_parts(ptr as _, len) }
+            }
         }
     }
 
