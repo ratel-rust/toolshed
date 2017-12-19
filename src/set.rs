@@ -12,6 +12,15 @@ pub struct Set<'arena, I: 'arena> {
     map: Map<'arena, I, ()>,
 }
 
+impl<'arena, I> Default for Set<'arena, I>
+where
+    I: 'arena,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'arena, I> Set<'arena, I>
 where
     I: 'arena,
@@ -53,6 +62,12 @@ where
     #[inline]
     pub fn insert(&self, arena: &'arena Arena, item: I) {
         self.map.insert(arena, item, ());
+    }
+
+    /// Gets a reference to the existing value in the set, if it exists
+    #[inline]
+    pub fn get(&self, key: I) -> Option<&I> {
+        self.map.get_key(key)
     }
 
     /// Returns `true` if the set contains a value.
