@@ -3,6 +3,7 @@
 
 use std::mem::size_of;
 use std::cell::Cell;
+use std::borrow::Cow;
 
 const ARENA_BLOCK: usize = 64 * 1024;
 
@@ -16,7 +17,7 @@ const ARENA_BLOCK: usize = 64 * 1024;
 pub struct Arena {
     store: Cell<Vec<Vec<u8>>>,
     ptr: Cell<*mut u8>,
-    offset: Cell<usize>
+    offset: Cell<usize>,
 }
 
 /// A pointer to an uninitialized region of memory.
@@ -77,7 +78,51 @@ impl Arena {
         Arena {
             store: Cell::new(store),
             ptr: Cell::new(ptr),
-            offset: Cell::new(0)
+            offset: Cell::new(0),
+        }
+    }
+
+    /// Allocate many items at once, without reallocating
+    #[inline]
+    pub fn alloc_many<'input, 'output, T: Sized + Copy + 'input, V: Into<Cow<'input, [T]>>>(
+        &'output self,
+        vals: V,
+    ) -> &'output [T] {
+        use std::{mem, ptr, slice};
+
+        let vals = vals.into();
+
+        if vals.as_ref().is_empty() {
+            return &[];
+        }
+
+        let len = vals.as_ref().len();
+        let bytes = len * mem::size_of::<T>();
+
+        match vals {
+            Cow::Owned(mut vec) => {
+                let p = vec.as_mut_ptr();
+                let cap = vec.capacity();
+
+                mem::forget(vec);
+
+                let out = self.alloc_vec(unsafe {
+                    Vec::from_raw_parts(
+                        p as _,
+                        len * mem::size_of::<T>(),
+                        cap * mem::size_of::<T>(),
+                    )
+                });
+
+                unsafe { slice::from_raw_parts(out as _, len) }
+            }
+            Cow::Borrowed(slice) => {
+                let ptr = self.require(bytes);
+
+                unsafe { ptr::copy_nonoverlapping(slice.as_ptr() as _, ptr, bytes) };
+
+                unsafe { slice::from_raw_parts(ptr as _, len) }
+            }
         }
     }
 
@@ -252,6 +297,17 @@ mod test {
     }
 
     #[test]
+    fn allocate_some_vecs() {
+        let arena = Arena::new();
+
+        let vecs = vec![vec![1u64, 2, 3, 4], vec![7; ARENA_BLOCK * 2], vec![]];
+
+        for vec in vecs {
+            assert_eq!(arena.alloc_many(vec.clone()), &vec[..]);
+        }
+    }
+
+    #[test]
     fn allocate_huge_heap() {
         let arena = Arena::new();
 
@@ -272,7 +328,10 @@ mod test {
         assert_eq!(arena.store.get_mut().len(), 2);
 
         // Second page is appropriately large
-        assert_eq!(arena.store.get_mut()[1].capacity(), size_of::<usize>() * 1024 * 1024);
+        assert_eq!(
+            arena.store.get_mut()[1].capacity(),
+            size_of::<usize>() * 1024 * 1024
+        );
     }
 
     #[test]
@@ -312,6 +371,11 @@ mod test {
         let allocated = unsafe { ::std::slice::from_raw_parts(ptr, 12) };
 
         assert_eq!(arena.offset.get(), 16);
-        assert_eq!(allocated, &[b'a', b'b', b'c', b'd', b'e', b'f', b'g', b'h', b'i', b'j', b'k', 0]);
+        assert_eq!(
+            allocated,
+            &[
+                b'a', b'b', b'c', b'd', b'e', b'f', b'g', b'h', b'i', b'j', b'k', 0
+            ]
+        );
     }
 }
