@@ -50,6 +50,16 @@ where
     last: CopyCell<Option<&'arena MapNode<'arena, K, V>>>,
 }
 
+impl<'arena, K, V> Default for Map<'arena, K, V>
+where
+    K: 'arena,
+    V: 'arena + Copy,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'arena, K, V> Map<'arena, K, V>
 where
     K: 'arena,
@@ -144,6 +154,14 @@ where
                 None
             }
         }
+    }
+
+    /// Returns the value corresponding to the key.
+    #[inline]
+    pub fn get_key(&self, key: K) -> Option<&K> {
+        let hash = Self::hash_key(&key);
+
+        self.find_slot(key, hash).get().map(|node| &node.key)
     }
 
     /// Returns the value corresponding to the key.

@@ -1,6 +1,6 @@
 //! A linked list and auxiliary types that can be used with the `Arena`.
 
-use Arena;
+use arena::Arena;
 use cell::CopyCell;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -190,8 +190,8 @@ pub struct GrowableList<'arena, T>
 where
     T: 'arena,
 {
-    first: CopyCell<Option<&'arena ListNode<'arena, T>>>,
     last: CopyCell<Option<&'arena ListNode<'arena, T>>>,
+    first: CopyCell<Option<&'arena ListNode<'arena, T>>>,
 }
 
 impl<'arena, T> GrowableList<'arena, T>
@@ -247,7 +247,7 @@ pub struct ListBuilder<'arena, T: 'arena>
 where
     T: 'arena,
 {
-    first: CopyCell<&'arena ListNode<'arena, T>>,
+    first: &'arena ListNode<'arena, T>,
     last: CopyCell<&'arena ListNode<'arena, T>>,
 }
 
@@ -258,14 +258,14 @@ where
     /// Create a new builder with the first element.
     #[inline]
     pub fn new(arena: &'arena Arena, first: T) -> Self {
-        let first = CopyCell::new(arena.alloc(ListNode {
+        let first = arena.alloc(ListNode {
             value: first,
             next: CopyCell::new(None)
-        }));
+        });
 
         ListBuilder {
             first,
-            last: first,
+            last: CopyCell::new(first),
         }
     }
 
@@ -290,7 +290,7 @@ where
     #[inline]
     pub fn as_list(&self) -> List<'arena, T> {
         List {
-            root: CopyCell::new(Some(self.first.get()))
+            root: CopyCell::new(Some(self.first))
         }
     }
 }
