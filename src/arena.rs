@@ -1,3 +1,6 @@
+//! Module containing the `Arena` and `Uninitialized` structs. For convenience the
+//! `Arena` is exported at the root of the crate.
+
 use std::mem::size_of;
 use std::cell::Cell;
 
