@@ -96,7 +96,7 @@ pub mod cell;
 pub mod map;
 pub mod set;
 pub mod list;
-mod arena;
+pub mod arena;
 mod bloom;
 mod impl_partial_eq;
 mod impl_debug;
