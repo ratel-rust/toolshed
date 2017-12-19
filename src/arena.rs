@@ -82,50 +82,6 @@ impl Arena {
         }
     }
 
-    /// Allocate many items at once, without reallocating
-    #[inline]
-    pub fn alloc_many<'input, 'output, T: Sized + Copy + 'input, V: Into<Cow<'input, [T]>>>(
-        &'output self,
-        vals: V,
-    ) -> &'output [T] {
-        use std::{mem, ptr, slice};
-
-        let vals = vals.into();
-
-        if vals.as_ref().is_empty() {
-            return &[];
-        }
-
-        let len = vals.as_ref().len();
-        let bytes = len * mem::size_of::<T>();
-
-        match vals {
-            Cow::Owned(mut vec) => {
-                let p = vec.as_mut_ptr();
-                let cap = vec.capacity();
-
-                mem::forget(vec);
-
-                let out = self.alloc_vec(unsafe {
-                    Vec::from_raw_parts(
-                        p as _,
-                        len * mem::size_of::<T>(),
-                        cap * mem::size_of::<T>(),
-                    )
-                });
-
-                unsafe { slice::from_raw_parts(out as _, len) }
-            }
-            Cow::Borrowed(slice) => {
-                let ptr = self.require(bytes);
-
-                unsafe { ptr::copy_nonoverlapping(slice.as_ptr() as _, ptr, bytes) };
-
-                unsafe { slice::from_raw_parts(ptr as _, len) }
-            }
-        }
-    }
-
     /// Put the value onto the page of the arena and return a reference to it.
     #[inline]
     pub fn alloc<'arena, T: Sized + Copy>(&'arena self, value: T) -> &'arena T {
@@ -154,6 +110,35 @@ impl Arena {
 
             copy_nonoverlapping(val.as_ptr(), ptr, val.len());
             from_raw_parts(ptr, val.len())
+        }
+    }
+
+    /// Put a `Vec<T>` on the arena without reallocating.
+    pub fn alloc_vec<'arena, T: Copy>(&'arena self, mut val: Vec<T>) -> &'arena [T] {
+        use std::{mem, slice};
+
+        let ptr = val.as_mut_ptr();
+        let cap = val.capacity();
+        let len = val.len();
+
+        mem::forget(val);
+
+        let out = self.alloc_byte_vec(unsafe {
+            Vec::from_raw_parts(ptr as _, 0, cap * size_of::<T>())
+        });
+
+        unsafe { slice::from_raw_parts(out as _, len) }
+    }
+
+    /// Allocate many items at once, avoid allocation for owned values.
+    #[inline]
+    pub fn alloc_cow<'input, 'arena, T>(&'arena self, vals: Cow<'input, [T]>) -> &'arena [T]
+    where
+        T: Sized + Copy + 'input,
+    {
+        match vals {
+            Cow::Owned(vec)      => self.alloc_vec(vec),
+            Cow::Borrowed(slice) => self.alloc_slice(slice),
         }
     }
 
@@ -191,7 +176,7 @@ impl Arena {
     /// This does not copy or reallocate the original `String`.
     pub fn alloc_string<'arena>(&'arena self, val: String) -> &'arena str {
         let len = val.len();
-        let ptr = self.alloc_vec(val.into_bytes());
+        let ptr = self.alloc_byte_vec(val.into_bytes());
 
         unsafe {
             use std::str::from_utf8_unchecked;
@@ -202,7 +187,7 @@ impl Arena {
     }
 
     #[inline]
-    fn alloc_vec(&self, mut val: Vec<u8>) -> *mut u8 {
+    fn alloc_byte_vec(&self, mut val: Vec<u8>) -> *mut u8 {
         let ptr = val.as_mut_ptr();
 
         let mut temp = self.store.replace(Vec::new());
@@ -213,7 +198,7 @@ impl Arena {
     }
 
     fn alloc_bytes(&self, size: usize) -> *mut u8 {
-        self.alloc_vec(Vec::with_capacity(size))
+        self.alloc_byte_vec(Vec::with_capacity(size))
     }
 
     #[inline]
@@ -243,7 +228,7 @@ impl Arena {
     }
 
     fn grow(&self) {
-        let ptr = self.alloc_vec(Vec::with_capacity(ARENA_BLOCK));
+        let ptr = self.alloc_byte_vec(Vec::with_capacity(ARENA_BLOCK));
         self.ptr.set(ptr);
     }
 
@@ -303,7 +288,18 @@ mod test {
         let vecs = vec![vec![1u64, 2, 3, 4], vec![7; ARENA_BLOCK * 2], vec![]];
 
         for vec in vecs {
-            assert_eq!(arena.alloc_many(vec.clone()), &vec[..]);
+            assert_eq!(arena.alloc_vec(vec.clone()), &vec[..]);
+        }
+    }
+
+    #[test]
+    fn allocate_some_cows() {
+        let arena = Arena::new();
+
+        let vecs = vec![vec![1u64, 2, 3, 4], vec![7; ARENA_BLOCK * 2], vec![]];
+
+        for vec in vecs {
+            assert_eq!(arena.alloc_cow(vec.clone().into()), &vec[..]);
         }
     }
 
