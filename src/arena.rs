@@ -117,10 +117,16 @@ impl<'arena> AsRef<str> for NulTermStr<'arena> {
 }
 
 impl<'arena> Deref for NulTermStr<'arena> {
-    type Target = str;
+    type Target = &'arena str;
 
-    fn deref(&self) -> &str {
-        self.0
+    fn deref(&self) -> &&'arena str {
+        &self.0
+    }
+}
+
+impl<'arena> From<NulTermStr<'arena>> for &'arena str {
+    fn from(nts: NulTermStr<'arena>) -> &'arena str {
+        nts.0
     }
 }
 
