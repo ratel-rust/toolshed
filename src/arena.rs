@@ -90,7 +90,7 @@ impl<'arena> NulTermStr<'arena> {
     /// let str = arena.alloc_nul_term_str("foo");
     ///
     /// // We can safely get the underlying `&str` at any time.
-    /// assert_eq!(str.as_ref(), "foo");
+    /// assert_eq!(&str[..], "foo");
     ///
     /// unsafe {
     ///     // First 3 bytes are known to us
