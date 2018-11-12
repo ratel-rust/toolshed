@@ -5,6 +5,7 @@ use std::mem::size_of;
 use std::ops::Deref;
 use std::cell::Cell;
 use std::borrow::Cow;
+use std::fmt;
 
 const ARENA_BLOCK: usize = 64 * 1024;
 
@@ -72,7 +73,20 @@ impl<'arena, T: 'arena> From<&'arena mut T> for Uninitialized<'arena, T> {
 
 /// A wrapper around a `str` slice that has an extra `0` byte allocated following
 /// its contents.
+#[derive(Clone, Copy, PartialEq)]
 pub struct NulTermStr<'arena>(&'arena str);
+
+impl<'arena> fmt::Debug for NulTermStr<'arena> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(self.0, f)
+    }
+}
+
+impl<'arena> fmt::Display for NulTermStr<'arena> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self.0, f)
+    }
+}
 
 impl<'arena> NulTermStr<'arena> {
     /// Read byte at a given `index`. This does not check for length boundaries,
@@ -437,5 +451,7 @@ mod test {
                 b'a', b'b', b'c', b'd', b'e', b'f', b'g', b'h', b'i', b'j', b'k', 0
             ]
         );
+
+        assert_eq!(nts.to_string(), "abcdefghijk");
     }
 }
