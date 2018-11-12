@@ -143,7 +143,7 @@ where
                 Some(old)
             },
             None => {
-                let new = Some(arena.alloc(MapNode::new(key, hash, value)));
+                let new = Some(&*arena.alloc(MapNode::new(key, hash, value)));
 
                 if let Some(last) = self.last.get() {
                     last.next.set(new);

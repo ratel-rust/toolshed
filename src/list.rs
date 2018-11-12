@@ -201,7 +201,7 @@ where
     /// Push a new item at the end of the `List`.
     #[inline]
     pub fn push(&self, arena: &'arena Arena, item: T) {
-        let next = Some(arena.alloc(ListNode {
+        let next = Some(&*arena.alloc(ListNode {
             value: item,
             next: CopyCell::new(None)
         }));

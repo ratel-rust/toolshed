@@ -51,9 +51,15 @@
 //!     // Create a new arena
 //!     let arena = Arena::new();
 //!
-//!     // The reference will live until `arena` goes out of scope
-//!     let child = arena.alloc(Foo::Integer(42));
-//!     let parent = arena.alloc(Foo::Nested(child));
+//!     // We allocate first instance of `Foo` in the arena.
+//!     //
+//!     // Please note that the `alloc` method returns a `&mut` reference.
+//!     // Since we want to share our references around, we are going to
+//!     // dereference and re-reference them to immutable ones with `&*`.
+//!     let child: &Foo = &*arena.alloc(Foo::Integer(42));
+//!
+//!     // Next instance of `Foo` will contain the child reference.
+//!     let parent: &Foo = &*arena.alloc(Foo::Nested(child));
 //!
 //!     // Empty map does not allocate
 //!     let map = Map::new();
@@ -62,8 +68,10 @@
 //!     // The reference can be shared, since `Arena` uses interior mutability.
 //!     map.insert(&arena, "child", child);
 //!
-//!     // We can put our `map` on the arena as well.
-//!     let map: &Map<&str, &Foo> = arena.alloc(map);
+//!     // We can put our `map` on the arena as well. Once again we use the `&*`
+//!     // operation to change the reference to be immutable, just to demonstrate
+//!     // that our `Map` implementation is perfectly happy with internal mutability.
+//!     let map: &Map<&str, &Foo> = &*arena.alloc(map);
 //!
 //!     // Each insert allocates a small chunk of data on the arena. Since arena is
 //!     // preallocated on the heap, these inserts are very, very fast.
@@ -92,11 +100,11 @@ extern crate serde_json;
 
 extern crate fxhash;
 
-pub mod cell;
+mod cell;
 pub mod map;
 pub mod set;
 pub mod list;
-pub mod arena;
+mod arena;
 mod bloom;
 mod impl_partial_eq;
 mod impl_debug;
@@ -104,5 +112,5 @@ mod impl_debug;
 #[cfg(feature = "impl_serialize")]
 mod impl_serialize;
 
-pub use arena::Arena;
+pub use arena::{Arena, Uninitialized, NulTermStr};
 pub use cell::CopyCell;

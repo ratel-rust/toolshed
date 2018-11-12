@@ -2,6 +2,7 @@
 //! `Arena` is exported at the root of the crate.
 
 use std::mem::size_of;
+use std::ops::Deref;
 use std::cell::Cell;
 use std::borrow::Cow;
 
@@ -28,10 +29,10 @@ pub struct Uninitialized<'arena, T: 'arena> {
 impl<'arena, T: 'arena> Uninitialized<'arena, T> {
     /// Initialize the memory at the pointer with a given value.
     #[inline]
-    pub fn init(self, value: T) -> &'arena T {
+    pub fn init(self, value: T) -> &'arena mut T {
         *self.pointer = value;
 
-        &*self.pointer
+        self.pointer
     }
 
     /// Get a reference to the pointer without writing to it.
@@ -46,7 +47,7 @@ impl<'arena, T: 'arena> Uninitialized<'arena, T> {
     ///
     /// **Reading from this reference without calling `init` is undefined behavior.**
     #[inline]
-    pub unsafe fn into_mut(self) -> &'arena mut T {
+    pub unsafe fn as_mut_ref(self) -> &'arena mut T {
         self.pointer
     }
 
@@ -69,6 +70,60 @@ impl<'arena, T: 'arena> From<&'arena mut T> for Uninitialized<'arena, T> {
     }
 }
 
+/// A wrapper around a `str` slice that has an extra `0` byte allocated following
+/// its contents.
+pub struct NulTermStr<'arena>(&'arena str);
+
+impl<'arena> NulTermStr<'arena> {
+    /// Read byte at a given `index`. This does not check for length boundaries,
+    /// but is guaranteed to return `0` for `index` equal to the length.
+    ///
+    /// This can be a very useful optimization when reading a long string one
+    /// byte at a time until termination, if checking for `0` can replace what
+    /// would otherwise have to be length checks.
+    ///
+    /// ```rust
+    /// # extern crate toolshed;
+    /// # use toolshed::Arena;
+    /// # fn main() {
+    /// let arena = Arena::new();
+    /// let str = arena.alloc_nul_term_str("foo");
+    ///
+    /// // We can safely get the underlying `&str` at any time.
+    /// assert_eq!(&str[..], "foo");
+    ///
+    /// unsafe {
+    ///     // First 3 bytes are known to us
+    ///     assert_eq!(str.byte_unchecked(0), b'f');
+    ///     assert_eq!(str.byte_unchecked(1), b'o');
+    ///     assert_eq!(str.byte_unchecked(2), b'o');
+    ///
+    ///     // Following is safe and guaranteed to be '0'
+    ///     assert_eq!(str.byte_unchecked(3), 0);
+    ///
+    ///     // Reading index 4 would be undefined behavior!
+    /// }
+    /// # }
+    /// ```
+    pub unsafe fn byte_unchecked(&self, index: usize) -> u8 {
+        *self.0.as_ptr().add(index)
+    }
+}
+
+impl<'arena> AsRef<str> for NulTermStr<'arena> {
+    fn as_ref(&self) -> &str {
+        self.0
+    }
+}
+
+impl<'arena> Deref for NulTermStr<'arena> {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        self.0
+    }
+}
+
 impl Arena {
     /// Create a new arena with a single preallocated 64KiB page.
     pub fn new() -> Self {
@@ -84,7 +139,7 @@ impl Arena {
 
     /// Put the value onto the page of the arena and return a reference to it.
     #[inline]
-    pub fn alloc<'arena, T: Sized + Copy>(&'arena self, value: T) -> &'arena T {
+    pub fn alloc<'arena, T: Sized + Copy>(&'arena self, value: T) -> &'arena mut T {
         self.alloc_uninitialized().init(value)
     }
 
@@ -159,16 +214,19 @@ impl Arena {
     /// No checks are performed on the source and whether or not it already contains
     /// any nul bytes. While this does not create any memory issues, it assumes that
     /// the reader of the source can deal with malformed source.
-    pub fn alloc_str_with_nul<'arena>(&'arena self, val: &str) -> *const u8 {
+    pub fn alloc_nul_term_str<'arena>(&'arena self, val: &str) -> NulTermStr {
         let len_with_zero = val.len() + 1;
         let ptr = self.require(len_with_zero);
 
         unsafe {
             use std::ptr::copy_nonoverlapping;
+            use std::slice::from_raw_parts;
+            use std::str::from_utf8_unchecked;
 
             copy_nonoverlapping(val.as_ptr(), ptr, val.len());
-            *ptr.offset(val.len() as isize) = 0;
-            ptr
+            *ptr.add(val.len()) = 0;
+
+            NulTermStr(from_utf8_unchecked(from_raw_parts(ptr, val.len())))
         }
     }
 
@@ -223,7 +281,7 @@ impl Arena {
             self.ptr.get()
         } else {
             self.offset.set(cap);
-            unsafe { self.ptr.get().offset(offset as isize) }
+            unsafe { self.ptr.get().add(offset) }
         }
     }
 
@@ -361,10 +419,10 @@ mod test {
     }
 
     #[test]
-    fn alloc_str_with_nul() {
+    fn alloc_nul_term_str() {
         let arena = Arena::new();
-        let ptr = arena.alloc_str_with_nul("abcdefghijk");
-        let allocated = unsafe { ::std::slice::from_raw_parts(ptr, 12) };
+        let nts = arena.alloc_nul_term_str("abcdefghijk");
+        let allocated = unsafe { ::std::slice::from_raw_parts(nts.as_ptr(), 12) };
 
         assert_eq!(arena.offset.get(), 16);
         assert_eq!(
