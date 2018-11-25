@@ -23,33 +23,40 @@ pub struct Arena {
 }
 
 /// A pointer to an uninitialized region of memory.
-pub struct Uninitialized<'arena, T: 'arena> {
-    pointer: &'arena mut T,
+pub struct Uninitialized<'arena, T: Copy + 'arena> {
+    pointer: &'arena mut MaybeUninit<T>,
 }
 
-impl<'arena, T: 'arena> Uninitialized<'arena, T> {
+/// Almost a copy of https://github.com/rust-lang/rust/issues/53491
+union MaybeUninit<T: Copy> {
+    value: T,
+    _uninit: (),
+}
+
+impl<'arena, T: Copy + 'arena> Uninitialized<'arena, T> {
     /// Initialize the memory at the pointer with a given value.
     #[inline]
     pub fn init(self, value: T) -> &'arena mut T {
-        *self.pointer = value;
-
-        self.pointer
+        unsafe {
+            self.pointer.value = value;
+            &mut self.pointer.value
+        }
     }
 
     /// Get a reference to the pointer without writing to it.
     ///
-    /// **Reading from this reference without calling `init` is undefined behavior.**
+    /// **Calling this method without calling `init` is undefined behavior.**
     #[inline]
     pub unsafe fn as_ref(&self) -> &'arena T {
-        &*(self.pointer as *const T)
+        &*(&self.pointer.value as *const T)
     }
 
     /// Convert the `Uninitialized` to a regular mutable reference.
     ///
-    /// **Reading from this reference without calling `init` is undefined behavior.**
+    /// **Calling this method without calling `init` is undefined behavior.**
     #[inline]
     pub unsafe fn as_mut_ref(self) -> &'arena mut T {
-        self.pointer
+        &mut self.pointer.value
     }
 
     /// Convert a raw pointer to an `Uninitialized`. This method is unsafe since it can
@@ -57,17 +64,15 @@ impl<'arena, T: 'arena> Uninitialized<'arena, T> {
     #[inline]
     pub unsafe fn from_raw(pointer: *mut T) -> Self {
         Uninitialized {
-            pointer: &mut *pointer,
+            pointer: &mut *(pointer as *mut MaybeUninit<T>),
         }
     }
 }
 
-impl<'arena, T: 'arena> From<&'arena mut T> for Uninitialized<'arena, T> {
+impl<'arena, T: Copy + 'arena> From<&'arena mut T> for Uninitialized<'arena, T> {
     #[inline]
     fn from(pointer: &'arena mut T) -> Self {
-        Uninitialized {
-            pointer
-        }
+        unsafe { Self::from_raw(pointer) }
     }
 }
 
@@ -167,7 +172,7 @@ impl Arena {
     #[inline]
     pub fn alloc_uninitialized<'arena, T: Sized + Copy>(&'arena self) -> Uninitialized<'arena, T> {
         Uninitialized {
-            pointer: unsafe { &mut *(self.require(size_of::<T>()) as *mut T) }
+            pointer: unsafe { &mut *(self.require(size_of::<T>()) as *mut MaybeUninit<T>) },
         }
     }
 
