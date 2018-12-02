@@ -7,6 +7,7 @@ use std::marker::PhantomData;
 /// library, but always require that the internal type implements `Copy`
 /// and implements `Copy` itself.
 #[derive(PartialEq, Eq)]
+#[repr(transparent)]
 pub struct CopyCell<T> {
     /// Internal value
     value: T,
@@ -34,15 +35,19 @@ impl<T> CopyCell<T> {
 impl<T: Copy> CopyCell<T> {
     #[inline]
     fn mut_ptr(&self) -> *mut T {
-        &self.value as *const T as *mut T
+        // We can just cast the pointer from `CopyCell<T>` to `T` because of
+        // #[repr(transparent)]
+        //
+        // This behavior is copied over from the std implementation of
+        // the `UnsafeCell`, and it's the best we can do right now in terms
+        // of soundness till we get a stable `UnsafeCell` that implements `Copy`.
+        self as *const CopyCell<T> as *const T as *mut T
     }
 
     /// Returns a copy of the contained value.
     #[inline]
     pub fn get(&self) -> T {
-        unsafe {
-            *self.mut_ptr()
-        }
+        self.value
     }
 
     /// Returns a mutable reference to the underlying data.
