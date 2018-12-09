@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 /// This should be identical to the `Cell` implementation in the standard
 /// library, but always require that the internal type implements `Copy`
 /// and implements `Copy` itself.
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Copy, Clone)]
 #[repr(transparent)]
 pub struct CopyCell<T> {
     /// Internal value
@@ -23,8 +23,7 @@ unsafe impl<T> Send for CopyCell<T> {}
 
 impl<T> CopyCell<T> {
     /// Creates a new `CopyCell` containing the given value.
-    #[inline]
-    pub fn new(value: T) -> Self {
+    pub const fn new(value: T) -> Self {
         CopyCell {
             value,
             _no_sync: PhantomData
@@ -45,11 +44,7 @@ impl<T: Copy> CopyCell<T> {
     /// memory safety guarantee.
     #[inline]
     pub fn get_mut<'a>(&'a mut self) -> &'a mut T {
-        // We can just cast the pointer from `CopyCell<T>` to `T` because of
-        // #[repr(transparent)]
-        unsafe {
-            &mut *(self as *mut CopyCell<T> as *mut T)
-        }
+        &mut self.value
     }
 
     /// Sets the contained value.
@@ -71,19 +66,10 @@ impl<T: Copy> CopyCell<T> {
     }
 }
 
-impl<T: Copy> Clone for CopyCell<T> {
-    #[inline]
-    fn clone(&self) -> CopyCell<T> {
-        CopyCell::new(self.get())
-    }
-}
-
-impl<T: Copy> Copy for CopyCell<T> { }
-
-impl<T: Debug + Copy> Debug for CopyCell<T> {
+impl<T: Debug> Debug for CopyCell<T> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        Debug::fmt(&self.get(), f)
+        Debug::fmt(&self.value, f)
     }
 }
 
@@ -94,8 +80,8 @@ mod test {
     #[test]
     fn cell() {
         let cell_a = CopyCell::new(42u64);
-        let mut cell_b = cell_a; // copy
-        let cell_c = &cell_a;    // reference
+        let cell_b = cell_a;  // copy
+        let cell_c = &cell_a; // reference
 
         assert_eq!(cell_a.get(), 42);
         assert_eq!(cell_b.get(), 42);
@@ -116,7 +102,7 @@ mod test {
         assert_eq!(cell_c.get(), 200);
 
         // Again, only affects the copy
-        *cell_b.get_mut() = 300;
+        cell_b.set(300);
 
         assert_eq!(cell_a.get(), 200);
         assert_eq!(cell_b.get(), 300);

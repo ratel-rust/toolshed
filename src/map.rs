@@ -1,18 +1,14 @@
 //! Maps of keys to values that can be used with the `Arena`.
 
 use std::hash::{Hash, Hasher};
-use fxhash::FxHasher;
+use rustc_hash::FxHasher;
 
-use cell::CopyCell;
-use Arena;
-use bloom::bloom;
+use crate::cell::CopyCell;
+use crate::Arena;
+use crate::bloom::bloom;
 
 #[derive(Clone, Copy)]
-struct MapNode<'arena, K, V>
-where
-    K: 'arena,
-    V: 'arena + Copy,
-{
+struct MapNode<'arena, K, V> {
     pub key: K,
     pub hash: u64,
     pub value: CopyCell<V>,
@@ -21,9 +17,8 @@ where
     pub next: CopyCell<Option<&'arena MapNode<'arena, K, V>>>,
 }
 
-impl<'arena, K, V: Copy> MapNode<'arena, K, V> {
-    #[inline]
-    pub fn new(key: K, hash: u64, value: V) -> Self {
+impl<'arena, K, V> MapNode<'arena, K, V> {
+    pub const fn new(key: K, hash: u64, value: V) -> Self {
         MapNode {
             key,
             hash,
@@ -41,39 +36,28 @@ impl<'arena, K, V: Copy> MapNode<'arena, K, V> {
 /// All the nodes of the map are also linked to allow iteration in
 /// insertion order.
 #[derive(Clone, Copy)]
-pub struct Map<'arena, K, V>
-where
-    K: 'arena,
-    V: 'arena + Copy,
-{
+pub struct Map<'arena, K, V> {
     root: CopyCell<Option<&'arena MapNode<'arena, K, V>>>,
     last: CopyCell<Option<&'arena MapNode<'arena, K, V>>>,
 }
 
-impl<'arena, K, V> Default for Map<'arena, K, V>
-where
-    K: 'arena,
-    V: 'arena + Copy,
-{
+impl<'arena, K, V> Default for Map<'arena, K, V> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'arena, K, V> Map<'arena, K, V>
-where
-    K: 'arena,
-    V: 'arena + Copy,
-{
+impl<'arena, K, V> Map<'arena, K, V> {
     /// Create a new, empty `Map`.
-    #[inline]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Map {
             root: CopyCell::new(None),
             last: CopyCell::new(None),
         }
     }
+}
 
+impl<'arena, K, V> Map<'arena, K, V> {
     /// Get an iterator over key value pairs.
     #[inline]
     pub fn iter(&self) -> MapIter<'arena, K, V> {
@@ -97,8 +81,8 @@ where
 
 impl<'arena, K, V> Map<'arena, K, V>
 where
-    K: 'arena + Eq + Hash + Copy,
-    V: 'arena + Copy,
+    K: Eq + Hash + Copy,
+    V: Copy,
 {
     #[inline]
     fn hash_key(key: &K) -> u64 {
@@ -188,25 +172,22 @@ where
 /// a common behavior. In this case it will very likely outperform a
 /// `HashMap`, even one with a fast hashing algorithm.
 #[derive(Clone, Copy)]
-pub struct BloomMap<'arena, K: 'arena, V: 'arena + Copy> {
+pub struct BloomMap<'arena, K, V> {
     filter: CopyCell<u64>,
     inner: Map<'arena, K, V>,
 }
 
-impl<'arena, K, V> BloomMap<'arena, K, V>
-where
-    K: 'arena,
-    V: 'arena + Copy,
-{
+impl<'arena, K, V> BloomMap<'arena, K, V> {
     /// Create a new, empty `BloomMap`.
-    #[inline]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         BloomMap {
             filter: CopyCell::new(0),
             inner: Map::new(),
         }
     }
+}
 
+impl<'arena, K, V: Copy> BloomMap<'arena, K, V> {
     /// Get an iterator over key value pairs.
     #[inline]
     pub fn iter(&self) -> MapIter<'arena, K, V> {
@@ -227,11 +208,10 @@ where
     }
 }
 
-
 impl<'arena, K, V> BloomMap<'arena, K, V>
 where
-    K: 'arena + Eq + Hash + Copy + AsRef<[u8]>,
-    V: 'arena + Copy,
+    K: Eq + Hash + Copy + AsRef<[u8]>,
+    V: Copy,
 {
     /// Inserts a key-value pair into the map. If the key was previously set,
     /// old value is returned.
@@ -264,19 +244,11 @@ where
 
 /// An iterator over the entries in the map.
 /// All entries are returned in insertion order.
-pub struct MapIter<'arena, K, V>
-where
-    K: 'arena,
-    V: 'arena + Copy,
-{
+pub struct MapIter<'arena, K, V> {
     next: Option<&'arena MapNode<'arena, K, V>>
 }
 
-impl<'arena, K, V> Iterator for MapIter<'arena, K, V>
-where
-    K: 'arena,
-    V: 'arena + Copy,
-{
+impl<'arena, K, V: Copy> Iterator for MapIter<'arena, K, V> {
     type Item = (&'arena K, V);
 
     #[inline]
@@ -284,19 +256,14 @@ where
         let next = self.next;
 
         next.map(|map_node| {
-            let key = &map_node.key;
-            let value = map_node.value.get();
+            let item = (&map_node.key, map_node.value.get());
             self.next = map_node.next.get();
-            (key, value)
+            item
         })
     }
 }
 
-impl<'arena, K, V> IntoIterator for Map<'arena, K, V>
-where
-    K: 'arena,
-    V: 'arena + Copy,
-{
+impl<'arena, K, V: Copy> IntoIterator for Map<'arena, K, V> {
     type Item = (&'arena K, V);
     type IntoIter = MapIter<'arena, K, V>;
 
@@ -306,11 +273,7 @@ where
     }
 }
 
-impl<'arena, K, V> IntoIterator for BloomMap<'arena, K, V>
-where
-    K: 'arena,
-    V: 'arena + Copy,
-{
+impl<'arena, K, V: Copy> IntoIterator for BloomMap<'arena, K, V> {
     type Item = (&'arena K, V);
     type IntoIter = MapIter<'arena, K, V>;
 
@@ -322,8 +285,8 @@ where
 
 impl<'arena, K, V> From<Map<'arena, K, V>> for BloomMap<'arena, K, V>
 where
-    K: 'arena + Eq + Hash + Copy + AsRef<[u8]>,
-    V: 'arena + Copy,
+    K: Eq + Hash + Copy + AsRef<[u8]>,
+    V: Copy,
 {
     fn from(map: Map<'arena, K, V>) -> BloomMap<'arena, K, V> {
         let mut filter = 0;
@@ -339,11 +302,7 @@ where
     }
 }
 
-impl<'arena, K, V> From<BloomMap<'arena, K, V>> for Map<'arena, K, V>
-where
-    K: 'arena + Eq + Hash + Copy + AsRef<[u8]>,
-    V: 'arena + Copy,
-{
+impl<'arena, K, V> From<BloomMap<'arena, K, V>> for Map<'arena, K, V> {
     #[inline]
     fn from(bloom_map: BloomMap<'arena, K, V>) -> Map<'arena, K, V> {
         bloom_map.inner

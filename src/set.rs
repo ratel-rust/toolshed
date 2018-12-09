@@ -2,32 +2,25 @@
 
 use std::hash::Hash;
 
-use map::{Map, BloomMap, MapIter};
-use Arena;
+use crate::map::{Map, BloomMap, MapIter};
+use crate::Arena;
 
 /// A set of values. This structure is using a `Map` with value
 /// type set to `()` internally.
 #[derive(Clone, Copy)]
-pub struct Set<'arena, I: 'arena> {
+pub struct Set<'arena, I> {
     map: Map<'arena, I, ()>,
 }
 
-impl<'arena, I> Default for Set<'arena, I>
-where
-    I: 'arena,
-{
+impl<I> Default for Set<'_, I> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'arena, I> Set<'arena, I>
-where
-    I: 'arena,
-{
+impl<'arena, I> Set<'arena, I> {
     /// Creates a new, empty `Set`.
-    #[inline]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Set {
             map: Map::new(),
         }
@@ -56,7 +49,7 @@ where
 
 impl<'arena, I> Set<'arena, I>
 where
-    I: 'arena + Eq + Hash + Copy,
+    I: Eq + Hash + Copy,
 {
     /// Inserts a value into the set.
     #[inline]
@@ -80,17 +73,13 @@ where
 /// A set of values with a bloom filter. This structure is
 /// using a `BloomMap` with value type set to `()` internally.
 #[derive(Clone, Copy)]
-pub struct BloomSet<'arena, I: 'arena> {
+pub struct BloomSet<'arena, I> {
     map: BloomMap<'arena, I, ()>,
 }
 
-impl<'arena, I> BloomSet<'arena, I>
-where
-    I: 'arena,
-{
+impl<'arena, I> BloomSet<'arena, I> {
     /// Creates a new, empty `BloomSet`.
-    #[inline]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         BloomSet {
             map: BloomMap::new(),
         }
@@ -119,7 +108,7 @@ where
 
 impl<'arena, I> BloomSet<'arena, I>
 where
-    I: 'arena + Eq + Hash + Copy + AsRef<[u8]>,
+    I: Eq + Hash + Copy + AsRef<[u8]>,
 {
     /// Inserts a value into the set.
     #[inline]
@@ -135,11 +124,11 @@ where
 }
 
 /// An iterator over the elements in the set.
-pub struct SetIter<'arena, I: 'arena> {
+pub struct SetIter<'arena, I> {
     inner: MapIter<'arena, I, ()>
 }
 
-impl<'arena, I: 'arena> Iterator for SetIter<'arena, I> {
+impl<'arena, I> Iterator for SetIter<'arena, I> {
     type Item = &'arena I;
 
     #[inline]
@@ -148,10 +137,7 @@ impl<'arena, I: 'arena> Iterator for SetIter<'arena, I> {
     }
 }
 
-impl<'arena, I> IntoIterator for Set<'arena, I>
-where
-    I: 'arena,
-{
+impl<'arena, I> IntoIterator for Set<'arena, I> {
     type Item = &'arena I;
     type IntoIter = SetIter<'arena, I>;
 
@@ -161,10 +147,7 @@ where
     }
 }
 
-impl<'arena, I> IntoIterator for BloomSet<'arena, I>
-where
-    I: 'arena,
-{
+impl<'arena, I> IntoIterator for BloomSet<'arena, I> {
     type Item = &'arena I;
     type IntoIter = SetIter<'arena, I>;
 
@@ -176,7 +159,7 @@ where
 
 impl<'arena, I> From<Set<'arena, I>> for BloomSet<'arena, I>
 where
-    I: 'arena + Eq + Hash + Copy + AsRef<[u8]>,
+    I: Eq + Hash + Copy + AsRef<[u8]>,
 {
     #[inline]
     fn from(set: Set<'arena, I>) -> BloomSet<'arena, I> {
@@ -186,10 +169,7 @@ where
     }
 }
 
-impl<'arena, I> From<BloomSet<'arena, I>> for Set<'arena, I>
-where
-    I: 'arena + Eq + Hash + Copy + AsRef<[u8]>,
-{
+impl<'arena, I> From<BloomSet<'arena, I>> for Set<'arena, I> {
     #[inline]
     fn from(bloom_set: BloomSet<'arena, I>) -> Set<'arena, I> {
         Set {

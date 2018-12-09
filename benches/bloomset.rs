@@ -1,13 +1,11 @@
 #![feature(test)]
 extern crate test;
-extern crate fxhash;
-extern crate toolshed;
 
 use toolshed::set::{BloomSet, Set};
 use toolshed::Arena;
 use test::{Bencher, black_box};
 use std::collections::HashSet;
-use fxhash::FxHashSet;
+use rustc_hash::FxHashSet;
 
 static WORDS: &[&str] = &[
     "ARENA_BLOCK", "Arena", "Cell", "Self", "String", "T", "Vec", "_unchecked", "a",

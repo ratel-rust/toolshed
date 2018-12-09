@@ -23,7 +23,7 @@ pub struct Arena {
 }
 
 /// A pointer to an uninitialized region of memory.
-pub struct Uninitialized<'arena, T: Copy + 'arena> {
+pub struct Uninitialized<'arena, T: Copy> {
     pointer: &'arena mut MaybeUninit<T>,
 }
 
@@ -33,7 +33,7 @@ union MaybeUninit<T: Copy> {
     _uninit: (),
 }
 
-impl<'arena, T: Copy + 'arena> Uninitialized<'arena, T> {
+impl<'arena, T: Copy> Uninitialized<'arena, T> {
     /// Initialize the memory at the pointer with a given value.
     #[inline]
     pub fn init(self, value: T) -> &'arena mut T {
@@ -69,7 +69,7 @@ impl<'arena, T: Copy + 'arena> Uninitialized<'arena, T> {
     }
 }
 
-impl<'arena, T: Copy + 'arena> From<&'arena mut T> for Uninitialized<'arena, T> {
+impl<'arena, T: Copy> From<&'arena mut T> for Uninitialized<'arena, T> {
     #[inline]
     fn from(pointer: &'arena mut T) -> Self {
         unsafe { Self::from_raw(pointer) }
@@ -102,7 +102,6 @@ impl<'arena> NulTermStr<'arena> {
     /// would otherwise have to be length checks.
     ///
     /// ```rust
-    /// # extern crate toolshed;
     /// # use toolshed::Arena;
     /// # fn main() {
     /// let arena = Arena::new();
@@ -452,11 +451,9 @@ mod test {
         assert_eq!(arena.offset.get(), 16);
         assert_eq!(
             allocated,
-            &[
-                b'a', b'b', b'c', b'd', b'e', b'f', b'g', b'h', b'i', b'j', b'k', 0
-            ]
+            "abcdefghijk\u{0}".as_bytes(),
         );
 
-        assert_eq!(nts.to_string(), "abcdefghijk");
+        assert_eq!(&**nts, "abcdefghijk");
     }
 }
