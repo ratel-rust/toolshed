@@ -1,28 +1,25 @@
 //! A linked list and auxiliary types that can be used with the `Arena`.
 
-use arena::Arena;
-use cell::CopyCell;
+use std::num::NonZeroUsize;
 
-#[derive(Debug, PartialEq, Clone)]
-struct ListNode<'arena, T: 'arena> {
+use crate::arena::Arena;
+use crate::cell::CopyCell;
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+struct ListNode<'arena, T> {
     value: T,
     next: CopyCell<Option<&'arena ListNode<'arena, T>>>,
 }
 
-impl<'arena, T: Copy> Copy for ListNode<'arena, T> {}
-
 /// A single-ended linked list.
-#[derive(Clone)]
-pub struct List<'arena, T: 'arena> {
+#[derive(Clone, Copy)]
+pub struct List<'arena, T> {
     root: CopyCell<Option<&'arena ListNode<'arena, T>>>,
 }
 
-impl<'arena, T: Copy> Copy for List<'arena, T> { }
-
-impl<'arena, T: 'arena> List<'arena, T> {
+impl<'arena, T> List<'arena, T> {
     /// Create a new empty `List`.
-    #[inline]
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         List {
             root: CopyCell::new(None)
         }
@@ -76,15 +73,14 @@ impl<'arena, T: 'arena> List<'arena, T> {
     #[inline]
     pub fn into_unsafe(self) -> UnsafeList {
         UnsafeList {
-            root: match self.root.get() {
-                Some(ptr) => ptr as *const ListNode<'arena, T> as usize,
-                None      => 0
-            }
+            root: self.root.get().map(|ptr| unsafe {
+                NonZeroUsize::new_unchecked(ptr as *const ListNode<T> as usize)
+            }),
         }
     }
 }
 
-impl<'arena, T: 'arena + Copy> List<'arena, T> {
+impl<'arena, T: Copy> List<'arena, T> {
     /// Create a single-element list from the given value.
     #[inline]
     pub fn from(arena: &'arena Arena, value: T) -> List<'arena, T> {
@@ -132,10 +128,7 @@ impl<'arena, T: 'arena + Copy> List<'arena, T> {
     /// Removes the first element from the list and returns it.
     #[inline]
     pub fn shift(&self) -> Option<&'arena T> {
-        let list_item = match self.root.get() {
-            None => return None,
-            Some(list_item) => list_item
-        };
+        let list_item = self.root.get()?;
 
         self.root.set(list_item.next.get());
 
@@ -150,10 +143,7 @@ impl<'arena, T: 'arena + Copy> List<'arena, T> {
     ///       If you wish to modify the list use `shift` instead.
     #[inline]
     pub fn shift_ref(&mut self) -> Option<&'arena T> {
-        let list_item = match self.root.get() {
-            None => return None,
-            Some(list_item) => list_item
-        };
+        let list_item = self.root.get()?;
 
         *self = List {
             root: list_item.next
@@ -163,7 +153,7 @@ impl<'arena, T: 'arena + Copy> List<'arena, T> {
     }
 }
 
-impl<'arena, T: 'arena> IntoIterator for List<'arena, T> {
+impl<'arena, T> IntoIterator for List<'arena, T> {
     type Item = &'arena T;
     type IntoIter = ListIter<'arena, T>;
 
@@ -173,7 +163,7 @@ impl<'arena, T: 'arena> IntoIterator for List<'arena, T> {
     }
 }
 
-impl<'a, 'arena, T: 'arena> IntoIterator for &'a List<'arena, T> {
+impl<'a, 'arena, T> IntoIterator for &'a List<'arena, T> {
     type Item = &'arena T;
     type IntoIter = ListIter<'arena, T>;
 
@@ -186,17 +176,14 @@ impl<'a, 'arena, T: 'arena> IntoIterator for &'a List<'arena, T> {
 /// A variant of the `List` that keeps track of the last element and thus
 /// allows user to push to the end of the list.
 #[derive(Clone, Copy)]
-pub struct GrowableList<'arena, T>
-where
-    T: 'arena,
-{
+pub struct GrowableList<'arena, T> {
     last: CopyCell<Option<&'arena ListNode<'arena, T>>>,
     first: CopyCell<Option<&'arena ListNode<'arena, T>>>,
 }
 
 impl<'arena, T> GrowableList<'arena, T>
 where
-    T: 'arena + Copy,
+    T: Copy,
 {
     /// Push a new item at the end of the `List`.
     #[inline]
@@ -215,13 +202,9 @@ where
     }
 }
 
-impl<'arena, T> GrowableList<'arena, T>
-where
-    T: 'arena,
-{
+impl<'arena, T> GrowableList<'arena, T> {
     /// Create a new builder.
-    #[inline]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         GrowableList {
             first: CopyCell::new(None),
             last: CopyCell::new(None),
@@ -243,18 +226,12 @@ where
 /// some checks on pushing given that it always has to have at least one
 /// element, and thus might be ever so slightly faster.
 #[derive(Clone, Copy)]
-pub struct ListBuilder<'arena, T: 'arena>
-where
-    T: 'arena,
-{
+pub struct ListBuilder<'arena, T> {
     first: &'arena ListNode<'arena, T>,
     last: CopyCell<&'arena ListNode<'arena, T>>,
 }
 
-impl<'arena, T> ListBuilder<'arena, T>
-where
-    T: 'arena + Copy,
-{
+impl<'arena, T: Copy> ListBuilder<'arena, T> {
     /// Create a new builder with the first element.
     #[inline]
     pub fn new(arena: &'arena Arena, first: T) -> Self {
@@ -282,10 +259,7 @@ where
     }
 }
 
-impl<'arena, T> ListBuilder<'arena, T>
-where
-    T: 'arena,
-{
+impl<'arena, T> ListBuilder<'arena, T> {
     /// Get a `List` from the builder.
     #[inline]
     pub fn as_list(&self) -> List<'arena, T> {
@@ -298,29 +272,26 @@ where
 /// Unsafe variant of the `List` that erases any lifetime information.
 #[derive(Debug, Clone, Copy)]
 pub struct UnsafeList {
-    root: usize
+    root: Option<NonZeroUsize>,
 }
 
 impl UnsafeList {
     /// Converts the `UnsafeList` into a regular `List`. Using this with
     /// incorrect lifetimes of after the original arena has been dropped
     /// will lead to undefined behavior. Use with extreme care.
-    pub unsafe fn into_list<'arena, T: 'arena>(self) -> List<'arena, T> {
+    pub unsafe fn into_list<'arena, T>(self) -> List<'arena, T> {
         List {
-            root: CopyCell::new(match self.root {
-                0   => None,
-                ptr => Some(&*(ptr as *const ListNode<'arena, T>))
-            })
+            root: CopyCell::new(self.root.map(|ptr| &*(ptr.get() as *const ListNode<'arena, T>))),
         }
     }
 }
 
 /// An iterator over the items in the list.
-pub struct ListIter<'arena, T: 'arena> {
+pub struct ListIter<'arena, T> {
     next: Option<&'arena ListNode<'arena, T>>
 }
 
-impl<'arena, T: 'arena> Iterator for ListIter<'arena, T> {
+impl<'arena, T> Iterator for ListIter<'arena, T> {
     type Item = &'arena T;
 
     #[inline]
@@ -436,7 +407,7 @@ mod test {
         let list: List<usize> = List::empty();
         let raw = list.into_unsafe();
 
-        assert_eq!(raw.root, 0);
+        assert!(raw.root.is_none());
 
         let list: List<usize> = unsafe { raw.into_list() };
 
@@ -454,7 +425,7 @@ mod test {
 
             let raw = list.into_unsafe();
 
-            assert_ne!(raw.root, 0);
+            assert!(raw.root.is_some());
 
             let list: List<usize> = unsafe { raw.into_list() };
 

@@ -1,7 +1,7 @@
 use std::fmt::{self, Debug};
-use list::{List, GrowableList, ListBuilder};
-use map::{Map, BloomMap};
-use set::{Set, BloomSet};
+use crate::list::{List, GrowableList, ListBuilder};
+use crate::map::{Map, BloomMap};
+use crate::set::{Set, BloomSet};
 
 impl<'arena, T> Debug for List<'arena, T>
 where
@@ -78,7 +78,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use Arena;
+    use crate::Arena;
 
     #[test]
     fn list_debug() {

@@ -1,7 +1,7 @@
 use serde::ser::{Serialize, Serializer};
-use list::List;
-use map::{Map, BloomMap};
-use set::{Set, BloomSet};
+use crate::list::List;
+use crate::map::{Map, BloomMap};
+use crate::set::{Set, BloomSet};
 
 impl<'arena, T> Serialize for List<'arena, T>
 where
@@ -74,7 +74,7 @@ where
 mod test {
     use super::*;
     use serde_json;
-    use Arena;
+    use crate::Arena;
 
     #[test]
     fn list_can_be_serialized() {

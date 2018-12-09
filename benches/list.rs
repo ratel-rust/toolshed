@@ -1,7 +1,5 @@
 #![feature(test)]
 extern crate test;
-extern crate fxhash;
-extern crate toolshed;
 
 use toolshed::list::ListBuilder;
 use toolshed::Arena;

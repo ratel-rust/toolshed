@@ -1,6 +1,6 @@
-use list::List;
-use map::{Map, BloomMap};
-use set::{Set, BloomSet};
+use crate::list::List;
+use crate::map::{Map, BloomMap};
+use crate::set::{Set, BloomSet};
 
 impl<'a, 'b, A, B> PartialEq<List<'b, B>> for List<'a, A>
 where

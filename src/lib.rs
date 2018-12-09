@@ -32,9 +32,6 @@
 //! ## Example
 //!
 //! ```rust
-//!
-//! extern crate toolshed;
-//!
 //! use toolshed::Arena;
 //! use toolshed::map::Map;
 //!
@@ -92,13 +89,11 @@
 
 // Pull in serde if `impl_serialize` is enabled
 #[cfg(feature = "impl_serialize")]
-extern crate serde;
+use serde;
 
 // Pull in serde_json for testing if `impl_serialize` is enabled
 #[cfg(all(test, feature = "impl_serialize"))]
-extern crate serde_json;
-
-extern crate fxhash;
+use serde_json;
 
 mod cell;
 pub mod map;
@@ -112,5 +107,5 @@ mod impl_debug;
 #[cfg(feature = "impl_serialize")]
 mod impl_serialize;
 
-pub use arena::{Arena, Uninitialized, NulTermStr};
-pub use cell::CopyCell;
+pub use self::arena::{Arena, Uninitialized, NulTermStr};
+pub use self::cell::CopyCell;
