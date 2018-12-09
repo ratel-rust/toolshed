@@ -38,15 +38,6 @@ impl<T: Copy> CopyCell<T> {
         self.value
     }
 
-    /// Returns a mutable reference to the underlying data.
-    ///
-    /// This call borrows `CopyCell` mutably, which gives us a compile time
-    /// memory safety guarantee.
-    #[inline]
-    pub fn get_mut<'a>(&'a mut self) -> &'a mut T {
-        &mut self.value
-    }
-
     /// Sets the contained value.
     #[inline]
     pub fn set(&self, value: T) {
