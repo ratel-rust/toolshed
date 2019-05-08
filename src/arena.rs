@@ -448,12 +448,12 @@ mod test {
     #[test]
     fn alloc_lazy_slices() {
       let arena = Arena::new();
-      let nums = [1, 2, 3, 4, 5, 1000];
+      let nums: [u32; 6] = [1, 2, 3, 4, 5, 1000];
 
       // Put the whole array in the arena
       let all_nums = arena.alloc_lazy_slice(nums.iter(), 6);
       // Put a whole array of half the nums in the arena
-      let half_nums = arena.alloc_lazy_slice(nums[0..3].iter(), 3);
+      let half_nums = arena.alloc_lazy_slice(nums[0..3].iter(), 6);
       // Truncate it using the `n` argument
       let trunc_nums = arena.alloc_lazy_slice(nums.iter(), 3);
 
