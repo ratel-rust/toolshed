@@ -212,7 +212,7 @@ impl Arena {
         }
         // Now fix the slice length and arena offset
         let diff = n - i;
-        self.reset_to( self.offset() - diff );
+        self.reset_to( self.offset() - diff * size_of::<T>() );
         from_raw_parts(ptr, i)
       }
     }
@@ -449,17 +449,18 @@ mod test {
     fn alloc_lazy_slices() {
       let arena = Arena::new();
       let nums: [u32; 6] = [1, 2, 3, 4, 5, 1000];
+      let big_nums: [u32; 6] = [100, 200, 300, 400, 500, 1050];
 
       // Put the whole array in the arena
-      let all_nums = arena.alloc_lazy_slice(nums.iter(), 6);
-      // Put a whole array of half the nums in the arena
-      let half_nums = arena.alloc_lazy_slice(nums[0..3].iter(), 6);
+      let all_nums = arena.alloc_lazy_slice(nums.iter().map(|x| *x), 6);
       // Truncate it using the `n` argument
-      let trunc_nums = arena.alloc_lazy_slice(nums.iter(), 3);
+      let trunc_nums = arena.alloc_lazy_slice(big_nums.iter().map(|x| *x), 3);
+      // Put a whole array of half the nums in the arena
+      let half_nums = arena.alloc_lazy_slice(nums[0..3].iter().map(|x| *x), 6);
 
-      assert!(nums.iter().eq(all_nums.iter().map(|x| *x)));
-      assert!(nums[0..3].iter().eq(half_nums.iter().map(|x| *x)));
-      assert!(nums[0..3].iter().eq(trunc_nums.iter().map(|x| *x)));
+      assert!(nums.iter().eq(all_nums.iter()));
+      assert!(nums[0..3].iter().eq(half_nums.iter()));
+      assert!(big_nums[0..3].iter().eq(trunc_nums.iter()));
     }
 
     #[test]
