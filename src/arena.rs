@@ -192,6 +192,31 @@ impl Arena {
         }
     }
 
+    /// Allocate a statically-sized but lazily-generated slice `[T]` out of an iterator
+    /// This is useful if you're going to make a slice of something and put it on the arena,
+    /// but you don't want to make an allocation first just to have something to copy in.
+    ///
+    /// The slice will be at maximum length `n`, further elements of the iterator ignored and not evaluated.
+    /// If the iterator yields less than `n` elements, a shorter slice will simply be returned.
+    pub fn alloc_lazy_slice<'arena, T, I: Iterator<Item=T>>(&'arena self, vals: I, n: usize) -> &'arena [T] {
+      // Grab space for `n` elements even if it may turn out we have to walk it back
+      let ptr = self.require(n * size_of::<T>()) as *mut T;
+      let mut i: usize = 0; 
+
+      unsafe {
+        use std::slice::from_raw_parts;
+
+        for val in vals.take(n) {
+          *ptr.offset(i as isize) = val;
+          i += 1;
+        }
+        // Now fix the slice length and arena offset
+        let diff = n - i;
+        self.reset_to( self.offset() - diff * size_of::<T>() );
+        from_raw_parts(ptr, i)
+      }
+    }
+
     /// Put a `Vec<T>` on the arena without reallocating.
     pub fn alloc_vec<'arena, T: Copy>(&'arena self, mut val: Vec<T>) -> &'arena [T] {
         use std::{mem, slice};
@@ -418,6 +443,24 @@ mod test {
 
         assert_eq!(arena.alloc_slice(&[10u16, 20u16]), &[10u16, 20u16][..]);
         assert_eq!(arena.offset.get(), 8);
+    }
+
+    #[test]
+    fn alloc_lazy_slices() {
+      let arena = Arena::new();
+      let nums: [u32; 6] = [1, 2, 3, 4, 5, 1000];
+      let big_nums: [u32; 6] = [100, 200, 300, 400, 500, 1050];
+
+      // Put the whole array in the arena
+      let all_nums = arena.alloc_lazy_slice(nums.iter().map(|x| *x), 6);
+      // Truncate it using the `n` argument
+      let trunc_nums = arena.alloc_lazy_slice(big_nums.iter().map(|x| *x), 3);
+      // Put a whole array of half the nums in the arena
+      let half_nums = arena.alloc_lazy_slice(nums[0..3].iter().map(|x| *x), 6);
+
+      assert!(nums.iter().eq(all_nums.iter()));
+      assert!(nums[0..3].iter().eq(half_nums.iter()));
+      assert!(big_nums[0..3].iter().eq(trunc_nums.iter()));
     }
 
     #[test]
