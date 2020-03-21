@@ -107,5 +107,5 @@ mod impl_debug;
 #[cfg(feature = "impl_serialize")]
 mod impl_serialize;
 
-pub use self::arena::{Arena, Uninitialized, NulTermStr};
+pub use self::arena::{Arena, Uninitialized};
 pub use self::cell::CopyCell;

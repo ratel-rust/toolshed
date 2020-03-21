@@ -1,11 +1,9 @@
 //! Module containing the `Arena` and `Uninitialized` structs. For convenience the
 //! `Arena` is exported at the root of the crate.
 
-use std::mem::size_of;
-use std::ops::Deref;
+use std::mem;
 use std::cell::Cell;
 use std::borrow::Cow;
-use std::fmt;
 
 const ARENA_BLOCK: usize = 64 * 1024;
 
@@ -23,8 +21,8 @@ pub struct Arena {
 }
 
 /// A pointer to an uninitialized region of memory.
-pub struct Uninitialized<'arena, T: Copy> {
-    pointer: &'arena mut MaybeUninit<T>,
+pub struct Uninitialized<'a, T: Copy> {
+    pointer: &'a mut MaybeUninit<T>,
 }
 
 /// Almost a copy of https://github.com/rust-lang/rust/issues/53491
@@ -33,10 +31,10 @@ union MaybeUninit<T: Copy> {
     _uninit: (),
 }
 
-impl<'arena, T: Copy> Uninitialized<'arena, T> {
+impl<'a, T: Copy> Uninitialized<'a, T> {
     /// Initialize the memory at the pointer with a given value.
     #[inline]
-    pub fn init(self, value: T) -> &'arena mut T {
+    pub fn init(self, value: T) -> &'a mut T {
         unsafe {
             self.pointer.value = value;
             &mut self.pointer.value
@@ -47,7 +45,7 @@ impl<'arena, T: Copy> Uninitialized<'arena, T> {
     ///
     /// **Calling this method without calling `init` is undefined behavior.**
     #[inline]
-    pub unsafe fn as_ref(&self) -> &'arena T {
+    pub unsafe fn as_ref(&self) -> &'a T {
         &*(&self.pointer.value as *const T)
     }
 
@@ -55,7 +53,7 @@ impl<'arena, T: Copy> Uninitialized<'arena, T> {
     ///
     /// **Calling this method without calling `init` is undefined behavior.**
     #[inline]
-    pub unsafe fn as_mut_ref(self) -> &'arena mut T {
+    pub unsafe fn as_mut_ref(self) -> &'a mut T {
         &mut self.pointer.value
     }
 
@@ -69,82 +67,10 @@ impl<'arena, T: Copy> Uninitialized<'arena, T> {
     }
 }
 
-impl<'arena, T: Copy> From<&'arena mut T> for Uninitialized<'arena, T> {
+impl<'a, T: Copy> From<&'a mut T> for Uninitialized<'a, T> {
     #[inline]
-    fn from(pointer: &'arena mut T) -> Self {
+    fn from(pointer: &'a mut T) -> Self {
         unsafe { Self::from_raw(pointer) }
-    }
-}
-
-/// A wrapper around a `str` slice that has an extra `0` byte allocated following
-/// its contents.
-#[derive(Clone, Copy, PartialEq)]
-pub struct NulTermStr<'arena>(&'arena str);
-
-impl<'arena> fmt::Debug for NulTermStr<'arena> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Debug::fmt(self.0, f)
-    }
-}
-
-impl<'arena> fmt::Display for NulTermStr<'arena> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self.0, f)
-    }
-}
-
-impl<'arena> NulTermStr<'arena> {
-    /// Read byte at a given `index`. This does not check for length boundaries,
-    /// but is guaranteed to return `0` for `index` equal to the length.
-    ///
-    /// This can be a very useful optimization when reading a long string one
-    /// byte at a time until termination, if checking for `0` can replace what
-    /// would otherwise have to be length checks.
-    ///
-    /// ```rust
-    /// # use toolshed::Arena;
-    /// # fn main() {
-    /// let arena = Arena::new();
-    /// let str = arena.alloc_nul_term_str("foo");
-    ///
-    /// // We can safely get the underlying `&str` at any time.
-    /// assert_eq!(&str[..], "foo");
-    ///
-    /// unsafe {
-    ///     // First 3 bytes are known to us
-    ///     assert_eq!(str.byte_unchecked(0), b'f');
-    ///     assert_eq!(str.byte_unchecked(1), b'o');
-    ///     assert_eq!(str.byte_unchecked(2), b'o');
-    ///
-    ///     // Following is safe and guaranteed to be '0'
-    ///     assert_eq!(str.byte_unchecked(3), 0);
-    ///
-    ///     // Reading index 4 would be undefined behavior!
-    /// }
-    /// # }
-    /// ```
-    pub unsafe fn byte_unchecked(&self, index: usize) -> u8 {
-        *self.0.as_ptr().add(index)
-    }
-}
-
-impl<'arena> AsRef<str> for NulTermStr<'arena> {
-    fn as_ref(&self) -> &str {
-        self.0
-    }
-}
-
-impl<'arena> Deref for NulTermStr<'arena> {
-    type Target = &'arena str;
-
-    fn deref(&self) -> &&'arena str {
-        &self.0
-    }
-}
-
-impl<'arena> From<NulTermStr<'arena>> for &'arena str {
-    fn from(nts: NulTermStr<'arena>) -> &'arena str {
-        nts.0
     }
 }
 
@@ -157,21 +83,21 @@ impl Arena {
         Arena {
             store: Cell::new(store),
             ptr: Cell::new(ptr),
-            offset: Cell::new(0),
+            offset: Cell::new(ARENA_BLOCK),
         }
     }
 
     /// Put the value onto the page of the arena and return a reference to it.
     #[inline]
-    pub fn alloc<'arena, T: Sized + Copy>(&'arena self, value: T) -> &'arena mut T {
+    pub fn alloc<'a, T: Sized + Copy>(&'a self, value: T) -> &'a mut T {
         self.alloc_uninitialized().init(value)
     }
 
     /// Allocate enough bytes for the type `T`, then return an `Uninitialized` pointer to the memory.
     #[inline]
-    pub fn alloc_uninitialized<'arena, T: Sized + Copy>(&'arena self) -> Uninitialized<'arena, T> {
+    pub fn alloc_uninitialized<'a, T: Sized + Copy>(&'a self) -> Uninitialized<'a, T> {
         Uninitialized {
-            pointer: unsafe { &mut *(self.require(size_of::<T>()) as *mut MaybeUninit<T>) },
+            pointer: unsafe { &mut *(self.require::<T>(mem::size_of::<T>()) as *mut MaybeUninit<T>) },
         }
     }
 
@@ -180,8 +106,8 @@ impl Arena {
     ///
     /// Note: static slices (`&'static [T]`) can be safely used in place of arena-bound
     ///       slices without having to go through this method.
-    pub fn alloc_slice<'arena, T: Copy>(&'arena self, val: &[T]) -> &'arena [T] {
-        let ptr = self.require(val.len() * size_of::<T>()) as *mut T;
+    pub fn alloc_slice<'a, T: Copy>(&'a self, val: &[T]) -> &'a [T] {
+        let ptr = self.require::<T>(val.len() * mem::size_of::<T>()) as *mut T;
 
         unsafe {
             use std::ptr::copy_nonoverlapping;
@@ -198,10 +124,10 @@ impl Arena {
     ///
     /// The slice will be at maximum length `n`, further elements of the iterator ignored and not evaluated.
     /// If the iterator yields less than `n` elements, a shorter slice will simply be returned.
-    pub fn alloc_lazy_slice<'arena, T, I: Iterator<Item=T>>(&'arena self, vals: I, n: usize) -> &'arena [T] {
+    pub fn alloc_lazy_slice<'a, T, I: Iterator<Item=T>>(&'a self, vals: I, n: usize) -> &'a [T] {
       // Grab space for `n` elements even if it may turn out we have to walk it back
-      let ptr = self.require(n * size_of::<T>()) as *mut T;
-      let mut i: usize = 0; 
+      let ptr = self.require::<T>(n * mem::size_of::<T>()) as *mut T;
+      let mut i: usize = 0;
 
       unsafe {
         use std::slice::from_raw_parts;
@@ -212,14 +138,14 @@ impl Arena {
         }
         // Now fix the slice length and arena offset
         let diff = n - i;
-        self.reset_to( self.offset() - diff * size_of::<T>() );
+        self.reset_to( self.offset() - diff * mem::size_of::<T>() );
         from_raw_parts(ptr, i)
       }
     }
 
     /// Put a `Vec<T>` on the arena without reallocating.
-    pub fn alloc_vec<'arena, T: Copy>(&'arena self, mut val: Vec<T>) -> &'arena [T] {
-        use std::{mem, slice};
+    pub fn alloc_vec<'a, T: Copy>(&'a self, mut val: Vec<T>) -> &'a [T] {
+        use std::slice;
 
         let ptr = val.as_mut_ptr();
         let cap = val.capacity();
@@ -228,7 +154,7 @@ impl Arena {
         mem::forget(val);
 
         let out = self.alloc_byte_vec(unsafe {
-            Vec::from_raw_parts(ptr as _, 0, cap * size_of::<T>())
+            Vec::from_raw_parts(ptr as _, 0, cap * mem::size_of::<T>())
         });
 
         unsafe { slice::from_raw_parts(out as _, len) }
@@ -236,7 +162,7 @@ impl Arena {
 
     /// Allocate many items at once, avoid allocation for owned values.
     #[inline]
-    pub fn alloc_cow<'input, 'arena, T>(&'arena self, vals: Cow<'input, [T]>) -> &'arena [T]
+    pub fn alloc_cow<'input, 'a, T>(&'a self, vals: Cow<'input, [T]>) -> &'a [T]
     where
         T: Sized + Copy + 'input,
     {
@@ -251,7 +177,7 @@ impl Arena {
     ///
     /// Note: static slices (`&'static str`) can be safely used in place of arena-bound
     ///       slices without having to go through this method.
-    pub fn alloc_str<'arena>(&'arena self, val: &str) -> &'arena str {
+    pub fn alloc_str<'a>(&'a self, val: &str) -> &'a str {
         unsafe {
             use std::str::from_utf8_unchecked;
 
@@ -259,29 +185,17 @@ impl Arena {
         }
     }
 
-    /// Allocate an `&str` slice onto the arena as null terminated C-style string.
-    /// No checks are performed on the source and whether or not it already contains
-    /// any nul bytes. While this does not create any memory issues, it assumes that
-    /// the reader of the source can deal with malformed source.
-    pub fn alloc_nul_term_str<'arena>(&'arena self, val: &str) -> NulTermStr {
-        let len_with_zero = val.len() + 1;
-        let ptr = self.require(len_with_zero);
-
-        unsafe {
-            use std::ptr::copy_nonoverlapping;
-            use std::slice::from_raw_parts;
-            use std::str::from_utf8_unchecked;
-
-            copy_nonoverlapping(val.as_ptr(), ptr, val.len());
-            *ptr.add(val.len()) = 0;
-
-            NulTermStr(from_utf8_unchecked(from_raw_parts(ptr, val.len())))
+    #[inline]
+    pub fn builder<'a>(&'a mut self) -> ArenaStr<'a> {
+        ArenaStr {
+            len: 0,
+            arena: self,
         }
     }
 
     /// Pushes the `String` as it's own page onto the arena and returns a reference to it.
     /// This does not copy or reallocate the original `String`.
-    pub fn alloc_string<'arena>(&'arena self, val: String) -> &'arena str {
+    pub fn alloc_string<'a>(&'a self, val: String) -> &'a str {
         let len = val.len();
         let ptr = self.alloc_byte_vec(val.into_bytes());
 
@@ -309,28 +223,24 @@ impl Arena {
     }
 
     #[inline]
-    fn require(&self, size: usize) -> *mut u8 {
-        // This should be optimized away for size known at compile time.
+    fn require<T>(&self, size: usize) -> *mut u8 {
         if size > ARENA_BLOCK {
             return self.alloc_bytes(size);
         }
 
-        let size = match size % size_of::<usize>() {
+        let size = match self.offset.get() % mem::align_of::<T>() {
             0 => size,
-            n => size + (size_of::<usize>() - n),
+            n => size + n,
         };
 
-        let offset = self.offset.get();
-        let cap = offset + size;
-
-        if cap > ARENA_BLOCK {
+        if let Some(offset) = self.offset.get().checked_sub(size) {
+            self.offset.set(offset);
+            unsafe { self.ptr.get().add(offset) }
+        } else {
             self.grow();
 
-            self.offset.set(size);
-            self.ptr.get()
-        } else {
-            self.offset.set(cap);
-            unsafe { self.ptr.get().add(offset) }
+            self.offset.set(ARENA_BLOCK - size);
+            unsafe { self.ptr.get().add(self.offset.get()) }
         }
     }
 
@@ -355,13 +265,24 @@ impl Arena {
     #[doc(hidden)]
     #[inline]
     pub unsafe fn offset(&self) -> usize {
-        self.offset.get()
+        ARENA_BLOCK - self.offset.get()
     }
 
     #[doc(hidden)]
     #[inline]
     pub unsafe fn reset_to(&self, offset: usize) {
-        self.offset.set(offset)
+        self.offset.set(ARENA_BLOCK - offset)
+    }
+}
+
+pub struct ArenaStr<'a> {
+    len: usize,
+    arena: &'a mut Arena,
+}
+
+impl<'a> ArenaStr<'a> {
+    pub fn push_str(&mut self, slice: &str) {
+
     }
 }
 
@@ -380,7 +301,7 @@ mod test {
         assert_eq!(arena.alloc(42u64), &42);
         assert_eq!(arena.alloc(0x8000000u64), &0x8000000u64);
 
-        assert_eq!(arena.offset.get(), 8 * 3);
+        assert_eq!(arena.offset.get(), ARENA_BLOCK - 8 * 3);
 
         // For inspecting internals
         let mut arena = arena;
@@ -420,9 +341,9 @@ mod test {
         arena.alloc_uninitialized::<[usize; 1024 * 1024]>();
 
         // Still writes to the first page
-        assert_eq!(arena.offset.get(), 8 * 2);
+        assert_eq!(arena.offset.get(), ARENA_BLOCK - 8 * 2);
         assert_eq!(arena.alloc(0x8000000u64), &0x8000000u64);
-        assert_eq!(arena.offset.get(), 8 * 3);
+        assert_eq!(arena.offset.get(), ARENA_BLOCK - 8 * 3);
 
         // For inspecting internals
         let mut arena = arena;
@@ -433,7 +354,7 @@ mod test {
         // Second page is appropriately large
         assert_eq!(
             arena.store.get_mut()[1].capacity(),
-            size_of::<usize>() * 1024 * 1024
+            mem::size_of::<usize>() * 1024 * 1024
         );
     }
 
@@ -442,7 +363,7 @@ mod test {
         let arena = Arena::new();
 
         assert_eq!(arena.alloc_slice(&[10u16, 20u16]), &[10u16, 20u16][..]);
-        assert_eq!(arena.offset.get(), 8);
+        assert_eq!(arena.offset.get(), ARENA_BLOCK - 4);
     }
 
     #[test]
@@ -468,10 +389,13 @@ mod test {
         let arena = Arena::new();
 
         assert_eq!(arena.alloc_slice(b"foo"), b"foo");
-        assert_eq!(arena.offset.get(), 8);
+        assert_eq!(arena.offset.get(), ARENA_BLOCK - 3);
+
+        assert_eq!(arena.alloc(42u64), &42);
+        assert_eq!(arena.offset.get(), ARENA_BLOCK - 16);
 
         assert_eq!(arena.alloc_slice(b"doge to the moon!"), b"doge to the moon!");
-        assert_eq!(arena.offset.get(), 32);
+        assert_eq!(arena.offset.get(), ARENA_BLOCK - 33);
     }
 
     #[test]
@@ -479,24 +403,12 @@ mod test {
         let arena = Arena::new();
 
         assert_eq!(arena.alloc_str("foo"), "foo");
-        assert_eq!(arena.offset.get(), 8);
+        assert_eq!(arena.offset.get(), ARENA_BLOCK - 3);
+
+        assert_eq!(arena.alloc(42u64), &42);
+        assert_eq!(arena.offset.get(), ARENA_BLOCK - 16);
 
         assert_eq!(arena.alloc_str("doge to the moon!"), "doge to the moon!");
-        assert_eq!(arena.offset.get(), 32);
-    }
-
-    #[test]
-    fn alloc_nul_term_str() {
-        let arena = Arena::new();
-        let nts = arena.alloc_nul_term_str("abcdefghijk");
-        let allocated = unsafe { ::std::slice::from_raw_parts(nts.as_ptr(), 12) };
-
-        assert_eq!(arena.offset.get(), 16);
-        assert_eq!(
-            allocated,
-            "abcdefghijk\u{0}".as_bytes(),
-        );
-
-        assert_eq!(&**nts, "abcdefghijk");
+        assert_eq!(arena.offset.get(), ARENA_BLOCK - 33);
     }
 }
